@@ -5,7 +5,15 @@ import json
 import streamlit as st
 
 from mica import create_ticket, generate_handoff_packet, revise_ticket
-from schemas import HandoffPacket, ReviewDecision, TicketEnvelope, TicketStatus
+from schemas import (
+    HandoffPacket,
+    ReviewDecision,
+    SpecialistOutput,
+    SpecialistType,
+    TicketEnvelope,
+    TicketStatus,
+)
+from specialists import run_specialist
 from storage import (
     add_review_record,
     list_ticket_json_files,
@@ -13,7 +21,9 @@ from storage import (
     overwrite_ticket,
     record_revision,
     save_handoff_packet,
+    save_specialist_output,
     save_ticket,
+    specialist_output_to_markdown,
     ticket_to_markdown,
     update_ticket_status,
 )
@@ -30,19 +40,44 @@ FOLDERS = [
 ]
 
 
+IMPLEMENTED_SPECIALISTS = [
+    SpecialistType.planner,
+    # Add these later after you create their prompt files:
+    # SpecialistType.researcher,
+    # SpecialistType.analyst,
+    # SpecialistType.writer,
+    # SpecialistType.engineer,
+    # SpecialistType.reviewer,
+    # SpecialistType.operator,
+    # SpecialistType.archivist,
+]
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def safe_enum_value(value: object, default: str = "None") -> str:
+    """Return .value for Enum-like objects, otherwise string fallback."""
+    if value is None:
+        return default
+    return str(getattr(value, "value", value))
 
 
 def build_handoff_md(packet: HandoffPacket) -> str:
     """Render a HandoffPacket as a copyable Markdown string."""
     constraints = "\n".join(f"- {c}" for c in packet.constraints) or "- None"
 
+    domain_type = getattr(packet, "domain_type", None)
+
     return f"""# {packet.title}
 
 ## Specialist
-{packet.specialist_type.value}
+{safe_enum_value(packet.specialist_type)}
+
+## Domain
+{safe_enum_value(domain_type)}
 
 ## Task
 {packet.task}
@@ -74,6 +109,7 @@ def init_session_state() -> None:
     defaults = {
         "last_ticket": None,
         "last_handoff_packet": None,
+        "last_specialist_output": None,
         "last_selected_ticket": None,
     }
 
@@ -110,6 +146,9 @@ def render_sidebar() -> tuple[str, str]:
 
             **Dispatch**  
             Prepare specialist handoff packets.
+
+            **Specialist Desk**  
+            Run universal specialists on approved handoff packets.
             """
         )
 
@@ -136,6 +175,14 @@ def render_ticket_summary(envelope: TicketEnvelope, *, show_status: bool = True)
 
     st.markdown(f"## {ticket.title}")
     render_ticket_metrics(envelope, show_status=show_status)
+
+    specialist_type = getattr(ticket, "specialist_type", None)
+    domain_type = getattr(ticket, "domain_type", None)
+
+    if specialist_type is not None or domain_type is not None:
+        c1, c2 = st.columns(2)
+        c1.metric("Specialist Type", safe_enum_value(specialist_type))
+        c2.metric("Domain Type", safe_enum_value(domain_type))
 
     st.markdown("### Objective")
     st.write(ticket.objective)
@@ -205,14 +252,56 @@ def select_ticket_ui(prefix: str):
 
     selected_path = ticket_files[labels.index(selected_label)]
 
-    # Avoid showing stale handoff packets for a different selected ticket.
+    # Avoid showing stale handoff/specialist outputs for a different selected ticket.
     selected_id = str(selected_path)
     if st.session_state.last_selected_ticket != selected_id:
         st.session_state.last_handoff_packet = None
+        st.session_state.last_specialist_output = None
         st.session_state.last_selected_ticket = selected_id
 
     envelope = load_ticket(selected_path)
     return selected_path, envelope
+
+
+def render_specialist_output(output: SpecialistOutput) -> None:
+    """Render a SpecialistOutput in the Specialist Desk."""
+    domain_type = getattr(output, "domain_type", None)
+    suggested_followup_tickets = getattr(output, "suggested_followup_tickets", [])
+
+    st.divider()
+    st.markdown(f"## {output.title}")
+
+    c1, c2 = st.columns(2)
+    c1.metric("Specialist", safe_enum_value(output.specialist_type))
+    c2.metric("Domain", safe_enum_value(domain_type))
+
+    st.markdown("### Summary")
+    st.write(output.summary)
+
+    st.markdown("### Deliverable")
+    st.markdown(output.deliverable)
+
+    with st.expander("Assumptions"):
+        st.write(output.assumptions or ["None"])
+
+    with st.expander("Risks"):
+        st.write(output.risks or ["None"])
+
+    with st.expander("Next Steps"):
+        st.write(output.next_steps or ["None"])
+
+    with st.expander("Review Questions"):
+        st.write(output.review_questions or ["None"])
+
+    with st.expander("Suggested Follow-up Tickets"):
+        st.write(suggested_followup_tickets or ["None"])
+
+    st.text_area(
+        "Copy full specialist output as Markdown",
+        value=specialist_output_to_markdown(output),
+        height=480,
+        key="specialist_output_markdown",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -225,12 +314,17 @@ st.set_page_config(page_title="O-Mica", page_icon="🏛️", layout="wide")
 init_session_state()
 
 st.title("🏛️ O-Mica")
-st.caption("Messy request → structured ticket → review → dispatch → archive")
+st.caption("Messy request → structured ticket → review → dispatch → specialist output → archive")
 
 project_key, model = render_sidebar()
 
-tab_create, tab_review, tab_dispatch = st.tabs(
-    ["New Edict / 下旨", "Review Desk / 批奏折", "Dispatch / 派遣"]
+tab_create, tab_review, tab_dispatch, tab_specialist = st.tabs(
+    [
+        "New Edict / 下旨",
+        "Review Desk / 批奏折",
+        "Dispatch / 派遣",
+        "Specialist Desk / 六部",
+    ]
 )
 
 
@@ -347,7 +441,7 @@ with tab_review:
 
         revision_instruction = st.text_area(
             "Revision instruction",
-            placeholder="Example: Too broad. Make this a one-day Jiuzhou task and avoid code changes for now.",
+            placeholder="Example: Too broad. Make this a one-day task and avoid code changes for now.",
             key="revision_instruction",
         )
 
@@ -483,7 +577,10 @@ with tab_dispatch:
         if packet:
             st.divider()
             st.markdown("### Handoff Packet Preview")
-            st.write(f"**Specialist:** {packet.specialist_type.value}")
+            st.write(f"**Specialist:** {safe_enum_value(packet.specialist_type)}")
+
+            domain_type = getattr(packet, "domain_type", None)
+            st.write(f"**Domain:** {safe_enum_value(domain_type)}")
 
             st.text_area(
                 "Copy handoff packet",
@@ -491,3 +588,68 @@ with tab_dispatch:
                 height=480,
                 key="dispatch_handoff_packet_preview",
             )
+
+
+# ---------------------------------------------------------------------------
+# Tab 4: Specialist Desk
+# ---------------------------------------------------------------------------
+
+
+with tab_specialist:
+    st.subheader("Specialist Desk / 六部")
+
+    st.info(
+        "This tab runs generalized specialists on an approved handoff packet. "
+        "Start with Planner / 策士, then add Researcher, Analyst, Writer, Engineer, "
+        "Reviewer, Operator, and Archivist later."
+    )
+
+    selected_specialist = st.selectbox(
+        "Specialist",
+        options=[s.value for s in IMPLEMENTED_SPECIALISTS],
+        index=0,
+        key="specialist_type",
+    )
+
+    handoff_packet = st.text_area(
+        "Paste approved handoff packet",
+        height=360,
+        placeholder="Paste the handoff packet generated from the Dispatch tab.",
+        key="specialist_handoff_packet",
+    )
+
+    extra_instruction = st.text_area(
+        "Optional extra instruction",
+        height=120,
+        placeholder="Example: Make this a one-week plan. Do not suggest code implementation yet.",
+        key="specialist_extra_instruction",
+    )
+
+    if st.button("Run specialist", type="primary", use_container_width=True):
+        if not handoff_packet.strip():
+            st.warning("Please paste a handoff packet first.")
+        else:
+            try:
+                with st.spinner("Specialist is preparing the deliverable..."):
+                    output = run_specialist(
+                        specialist_type=SpecialistType(selected_specialist),
+                        handoff_packet=handoff_packet,
+                        api_key=st.secrets["OPENAI_API_KEY"],
+                        model=model,
+                        extra_instruction=extra_instruction,
+                    )
+
+                st.session_state.last_specialist_output = output
+                st.success("Specialist output generated.")
+            except Exception as e:
+                st.error("Failed to run specialist.")
+                st.exception(e)
+
+    output = st.session_state.get("last_specialist_output")
+
+    if output:
+        render_specialist_output(output)
+
+        if st.button("Save specialist output", use_container_width=True):
+            path = save_specialist_output(output)
+            st.success(f"Saved to: `{path}`")

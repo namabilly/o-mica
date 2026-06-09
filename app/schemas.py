@@ -22,14 +22,38 @@ class Priority(str, Enum):
 
 
 class SpecialistType(str, Enum):
-    chief_of_staff = "chief_of_staff"
-    game_producer = "game_producer"
-    game_engineer = "game_engineer"
-    research_scout = "research_scout"
-    research_analyst = "research_analyst"
-    writing_editor = "writing_editor"
-    daily_ops = "daily_ops"
+    planner = "planner"
+    researcher = "researcher"
+    analyst = "analyst"
+    writer = "writer"
+    engineer = "engineer"
+    reviewer = "reviewer"
+    operator = "operator"
+    archivist = "archivist"
     none = "none"
+
+
+class DomainType(str, Enum):
+    general = "general"
+    game = "game"
+    research = "research"
+    writing = "writing"
+    code = "code"
+    daily = "daily"
+    admin = "admin"
+
+
+class SpecialistOutput(BaseModel):
+    title: str
+    specialist_type: SpecialistType
+    domain_type: DomainType
+    summary: str
+    deliverable: str
+    assumptions: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    next_steps: list[str] = Field(default_factory=list)
+    review_questions: list[str] = Field(default_factory=list)
+    suggested_followup_tickets: list[str] = Field(default_factory=list)
 
 
 class TicketStatus(str, Enum):
@@ -57,6 +81,9 @@ class ReviewRecord(BaseModel):
     timestamp: Optional[str] = None
 
 
+
+
+
 class TaskTicket(BaseModel):
     title: str = Field(description="Short actionable title.")
     category: TaskCategory
@@ -72,7 +99,8 @@ class TaskTicket(BaseModel):
         default=None,
         description="Suggested future specialist agent, if any.",
     )
-    specialist_type: SpecialistType = SpecialistType.chief_of_staff
+    specialist_type: SpecialistType = SpecialistType.planner
+    domain_type: DomainType = DomainType.general
 
     next_action: str = Field(description="The immediate next action.")
     human_review_required: bool = True
@@ -116,6 +144,7 @@ class TicketRevisionRequest(BaseModel):
 class HandoffPacket(BaseModel):
     title: str
     specialist_type: SpecialistType
+    domain_type: DomainType
     task: str
     context: str
     constraints: list[str] = []

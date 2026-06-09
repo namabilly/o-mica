@@ -1,16 +1,75 @@
-.venv/
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+
 __pycache__/
+*.py[cod]
+*$py.class
+
+.venv/
+venv/
+env/
+ENV/
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ---------------------------------------------------------------------------
+# Streamlit / secrets
+# ---------------------------------------------------------------------------
+
 .streamlit/secrets.toml
 .env
+.env.*
+!.env.example
+
+# ---------------------------------------------------------------------------
+# O-Mica generated data
+# ---------------------------------------------------------------------------
+
 tickets/open/*.json
 tickets/open/*.md
-tickets/archived/*.json
-tickets/archived/*.md
+
+tickets/under_review/*.json
+tickets/under_review/*.md
+
 tickets/approved/*.json
 tickets/approved/*.md
-tickets/rejected/*.json
-tickets/rejected/*.md
+
 tickets/delegated/*.json
 tickets/delegated/*.md
+
 tickets/completed/*.json
 tickets/completed/*.md
+
+tickets/archived/*.json
+tickets/archived/*.md
+
+tickets/rejected/*.json
+tickets/rejected/*.md
+
+outputs/**/*.json
+outputs/**/*.md
+
+# Keep folder structure
+!tickets/open/.gitkeep
+!tickets/under_review/.gitkeep
+!tickets/approved/.gitkeep
+!tickets/delegated/.gitkeep
+!tickets/completed/.gitkeep
+!tickets/archived/.gitkeep
+!tickets/rejected/.gitkeep
+!outputs/.gitkeep
+
+# ---------------------------------------------------------------------------
+# OS / editor
+# ---------------------------------------------------------------------------
+
+.DS_Store
+Thumbs.db
+
+.vscode/
+.idea/
