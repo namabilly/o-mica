@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+.streamlit/secrets.toml
+.env
+tickets/open/*.json
+tickets/open/*.md
+tickets/archived/*.json
+tickets/archived/*.md
