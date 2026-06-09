@@ -6,3 +6,11 @@ tickets/open/*.json
 tickets/open/*.md
 tickets/archived/*.json
 tickets/archived/*.md
+tickets/approved/*.json
+tickets/approved/*.md
+tickets/rejected/*.json
+tickets/rejected/*.md
+tickets/delegated/*.json
+tickets/delegated/*.md
+tickets/completed/*.json
+tickets/completed/*.md

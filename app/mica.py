@@ -4,8 +4,12 @@ from pathlib import Path
 from typing import Optional
 
 from openai import OpenAI
-from prompts import MICA_SYSTEM_PROMPT
-from schemas import TicketEnvelope
+from prompts import (
+    MICA_SYSTEM_PROMPT,
+    TICKET_REVISION_PROMPT,
+    HANDOFF_PACKET_PROMPT,
+)
+from schemas import TicketEnvelope, HandoffPacket
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -88,3 +92,71 @@ Create a structured ticket. Do not execute the task.
         raise RuntimeError("Model returned no parsed ticket.")
 
     return parsed
+
+
+def revise_ticket(
+    *,
+    envelope: TicketEnvelope,
+    revision_instruction: str,
+    api_key: str,
+    model: str,
+) -> TicketEnvelope:
+    client = OpenAI(api_key=api_key)
+
+    user_content = f"""
+Existing ticket:
+{envelope.model_dump_json(indent=2)}
+
+Billy's revision instruction:
+{revision_instruction}
+
+Revise the ticket. Do not execute the task.
+"""
+
+    completion = client.beta.chat.completions.parse(
+        model=model,
+        messages=[
+            {"role": "system", "content": TICKET_REVISION_PROMPT},
+            {"role": "user", "content": user_content},
+        ],
+        response_format=TicketEnvelope,
+    )
+
+    parsed = completion.choices[0].message.parsed
+    if parsed is None:
+        raise RuntimeError("Model returned no revised ticket.")
+
+    return parsed
+
+
+def generate_handoff_packet(
+    *,
+    envelope: TicketEnvelope,
+    api_key: str,
+    model: str,
+) -> HandoffPacket:
+    client = OpenAI(api_key=api_key)
+
+    user_content = f"""
+Approved ticket:
+{envelope.model_dump_json(indent=2)}
+
+Create a specialist handoff packet.
+"""
+
+    completion = client.beta.chat.completions.parse(
+        model=model,
+        messages=[
+            {"role": "system", "content": HANDOFF_PACKET_PROMPT},
+            {"role": "user", "content": user_content},
+        ],
+        response_format=HandoffPacket,
+    )
+
+    parsed = completion.choices[0].message.parsed
+    if parsed is None:
+        raise RuntimeError("Model returned no handoff packet.")
+
+    return parsed
+
+    
