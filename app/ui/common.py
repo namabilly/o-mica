@@ -7,8 +7,10 @@ import streamlit as st
 
 from schemas import FollowupTicketBatch, HandoffPacket, SpecialistOutput, TicketEnvelope
 from storage import (
+    list_handoff_packet_files,
     list_specialist_output_files,
     list_ticket_json_files,
+    load_handoff_packet_json,
     load_specialist_output_json,
     load_ticket,
     specialist_output_to_markdown,
@@ -249,6 +251,44 @@ def select_ticket_ui(prefix: str, folders: list[str]):
     envelope = load_ticket(selected_path)
     return selected_path, envelope
 
+
+def select_handoff_packet_ui(prefix: str, implemented_specialists: list):
+    specialist_filter = st.selectbox(
+        "Handoff folder",
+        options=["all"] + [s.value for s in implemented_specialists],
+        index=0,
+        key=f"{prefix}_handoff_filter",
+    )
+
+    if specialist_filter == "all":
+        handoff_files = list_handoff_packet_files()
+    else:
+        handoff_files = list_handoff_packet_files(specialist_filter)
+
+    # list_handoff_packet_files returns .md files. Load matching .json files.
+    json_files = [
+        path.with_suffix(".json")
+        for path in handoff_files
+        if path.with_suffix(".json").exists()
+    ]
+
+    if not json_files:
+        st.info("No saved handoff packets found.")
+        return None, None
+
+    labels = [path.stem for path in json_files]
+
+    selected_label = st.selectbox(
+        "Select saved handoff packet",
+        options=labels,
+        key=f"{prefix}_selected_handoff_packet",
+    )
+
+    selected_path = json_files[labels.index(selected_label)]
+    packet = load_handoff_packet_json(selected_path)
+
+    return selected_path, packet
+    
 
 def select_specialist_output_ui(prefix: str, implemented_specialists: list):
     specialist_filter = st.selectbox(

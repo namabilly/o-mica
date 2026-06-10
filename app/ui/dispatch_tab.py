@@ -4,7 +4,12 @@ import streamlit as st
 
 from mica import generate_handoff_packet
 from schemas import ReviewDecision
-from storage import add_review_record, load_ticket, save_handoff_packet
+from storage import (
+    add_review_record,
+    load_ticket,
+    save_handoff_packet,
+    save_handoff_packet_record,
+)
 from ui.common import (
     build_handoff_md,
     render_ticket_summary,
@@ -85,12 +90,16 @@ def render_dispatch_tab(*, model: str, folders: list[str]) -> None:
             )
 
             moved_envelope = load_ticket(new_path)
-            packet_path = save_handoff_packet(moved_envelope, handoff_md)
+            legacy_packet_path = save_handoff_packet(moved_envelope, handoff_md)
+            handoff_json_path, handoff_md_path = save_handoff_packet_record(packet)
 
             st.session_state.last_handoff_packet = packet
 
             st.success(
-                f"Ticket approved and handoff packet saved to:\n\n`{packet_path}`"
+                "Ticket approved and handoff packet saved:\n\n"
+                f"- Legacy ticket-side Markdown: `{legacy_packet_path}`\n"
+                f"- Handoff JSON: `{handoff_json_path}`\n"
+                f"- Handoff Markdown: `{handoff_md_path}`"
             )
             st.rerun()
         except Exception as e:

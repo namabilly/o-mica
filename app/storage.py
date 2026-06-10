@@ -8,6 +8,7 @@ from typing import List, Optional
 
 from schemas import (
     FollowupTicketBatch,
+    HandoffPacket,
     ReviewDecision,
     ReviewRecord,
     SpecialistOutput,
@@ -20,6 +21,7 @@ from schemas import (
 ROOT = Path(__file__).resolve().parents[1]
 
 TICKETS_DIR = ROOT / "tickets"
+HANDOFFS_DIR = ROOT / "handoffs"
 OUTPUTS_DIR = ROOT / "outputs"
 
 
@@ -45,6 +47,11 @@ def ensure_ticket_dirs() -> None:
     """Create all ticket subfolders if they do not exist yet."""
     for folder in set(STATUS_TO_FOLDER.values()):
         (TICKETS_DIR / folder).mkdir(parents=True, exist_ok=True)
+
+
+def ensure_handoff_dirs() -> None:
+    """Create the root handoffs folder if it does not exist yet."""
+    HANDOFFS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def ensure_output_dirs() -> None:
@@ -446,6 +453,144 @@ def save_handoff_packet(envelope: TicketEnvelope, packet_md: str) -> Path:
     packet_path.write_text(packet_md, encoding="utf-8")
 
     return packet_path
+
+
+def handoff_packet_to_markdown(packet: HandoffPacket) -> str:
+    """Render a HandoffPacket as Markdown."""
+    constraints = _bullets(packet.constraints)
+
+    return f"""# {packet.title}
+
+## Handoff ID
+{packet.handoff_id}
+
+## Source Ticket ID
+{packet.source_ticket_id or "None"}
+
+## Source Ticket
+{packet.source_ticket_title}
+
+## Specialist
+{_safe_enum_value(packet.specialist_type)}
+
+## Domain
+{_safe_enum_value(packet.domain_type)}
+
+## Task
+{packet.task}
+
+## Context
+{packet.context}
+
+## Constraints
+{constraints}
+
+## Required Output
+{packet.required_output}
+
+## Quality Bar
+{packet.quality_bar}
+
+## Stop Condition
+{packet.stop_condition}
+
+## Handoff Prompt
+{packet.handoff_prompt}
+"""
+
+
+def save_handoff_packet_record(packet: HandoffPacket) -> tuple[Path, Path]:
+    """Save a structured handoff packet as both JSON and Markdown.
+
+    Files are stored under:
+
+        handoffs/<specialist_type>/
+
+    Returns:
+        (json_path, md_path)
+    """
+    ensure_handoff_dirs()
+
+    specialist_name = _safe_enum_value(packet.specialist_type, default="unknown")
+    target_dir = HANDOFFS_DIR / specialist_name
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    slug = slugify(packet.title)
+    source_ticket_id = packet.source_ticket_id or "no-ticket"
+    base = f"{timestamp_now()}-{packet.handoff_id}-{source_ticket_id}-{slug}"
+
+    json_path = target_dir / f"{base}.json"
+    md_path = target_dir / f"{base}.md"
+
+    json_path.write_text(
+        packet.model_dump_json(indent=2),
+        encoding="utf-8",
+    )
+
+    md_path.write_text(
+        handoff_packet_to_markdown(packet),
+        encoding="utf-8",
+    )
+
+    return json_path, md_path
+
+
+def list_handoff_packet_files(
+    specialist_type: Optional[str] = None,
+) -> List[Path]:
+    """List saved handoff packet Markdown files, newest-first.
+
+    If specialist_type is given, searches only handoffs/<specialist_type>/.
+    Otherwise, searches all handoff folders.
+    """
+    ensure_handoff_dirs()
+
+    if specialist_type:
+        return sorted((HANDOFFS_DIR / specialist_type).glob("*.md"), reverse=True)
+
+    files: List[Path] = []
+
+    for child in HANDOFFS_DIR.iterdir():
+        if child.is_dir():
+            files.extend(child.glob("*.md"))
+
+    return sorted(files, reverse=True)
+
+
+def load_handoff_packet_json(path: Path) -> HandoffPacket:
+    """Load a HandoffPacket from a JSON file."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return HandoffPacket.model_validate(data)
+
+
+def find_handoff_packet_path_by_id(handoff_id: str) -> Optional[Path]:
+    """Find a saved handoff JSON file by handoff_id."""
+    ensure_handoff_dirs()
+
+    for child in HANDOFFS_DIR.iterdir():
+        if not child.is_dir():
+            continue
+
+        for path in child.glob("*.json"):
+            try:
+                packet = load_handoff_packet_json(path)
+            except Exception:
+                continue
+
+            if packet.handoff_id == handoff_id:
+                return path
+
+    return None
+
+
+def load_handoff_packet_by_id(handoff_id: str) -> Optional[HandoffPacket]:
+    """Load a HandoffPacket by handoff_id, if found."""
+    path = find_handoff_packet_path_by_id(handoff_id)
+
+    if path is None:
+        return None
+
+    return load_handoff_packet_json(path)
 
 
 # ---------------------------------------------------------------------------
