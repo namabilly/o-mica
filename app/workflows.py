@@ -45,14 +45,17 @@ from schemas import (
     WorkflowMode,
 )
 from specialists import run_specialist
+from schemas import TicketStatus
 from storage import (
     deliverable_from_output,
+    find_ticket_path_by_id,
     handoff_packet_to_markdown,
     save_deliverable,
     save_handoff_packet_record,
     save_run_trace,
     save_specialist_output,
     save_ticket,
+    update_ticket_status,
 )
 
 
@@ -60,22 +63,20 @@ from storage import (
 # Safety policy
 # ---------------------------------------------------------------------------
 
-# Conservative starting policy. Engineer and external-action specialists stay
-# manual-only; Planner is manual/guided; Writer may run in any mode.
+# Auto is the go-to mode, so specialists may run in any mode by default. Only
+# specialists that can touch code or the outside world are gated to manual —
+# and even those can be advanced explicitly via continue_run (an explicit click
+# is the human consent the gate was protecting for).
+_ALL_MODES = {WorkflowMode.manual, WorkflowMode.guided, WorkflowMode.auto}
+
+# Specialists that should NOT advance automatically; listed for clarity.
 ALLOWED_MODES: dict[SpecialistType, set[WorkflowMode]] = {
-    SpecialistType.planner: {WorkflowMode.manual, WorkflowMode.guided},
-    SpecialistType.writer: {
-        WorkflowMode.manual,
-        WorkflowMode.guided,
-        WorkflowMode.auto,
-    },
-    SpecialistType.researcher: {WorkflowMode.manual, WorkflowMode.guided},
     SpecialistType.engineer: {WorkflowMode.manual},
     SpecialistType.operator: {WorkflowMode.manual},
 }
 
-# Fallback for any specialist not listed above: manual only, to stay safe.
-_DEFAULT_ALLOWED_MODES = {WorkflowMode.manual}
+# Default for any specialist not listed above: all modes (low risk).
+_DEFAULT_ALLOWED_MODES = set(_ALL_MODES)
 
 
 class ModeNotAllowedError(Exception):
@@ -140,6 +141,33 @@ def _finish(
     trace.finished_at = _iso_now()
     save_run_trace(trace)
     return trace
+
+
+def _new_trace(
+    mode: WorkflowMode,
+    *,
+    user_request: str,
+    project_key: str,
+    trace: Optional[RunTrace] = None,
+) -> RunTrace:
+    """Return the trace to use for a run.
+
+    If a caller (e.g. the background run manager) supplies a trace, use it so the
+    UI can observe steps live as they are appended. Otherwise create a fresh one.
+    """
+    if trace is not None:
+        trace.mode = mode
+        trace.request = user_request
+        trace.project_key = project_key
+        trace.started_at = _iso_now()
+        return trace
+
+    return RunTrace(
+        mode=mode,
+        request=user_request,
+        project_key=project_key,
+        started_at=_iso_now(),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -308,16 +336,17 @@ def run_manual(
     api_key: str,
     model: str,
     extra_context: Optional[str] = None,
+    trace: Optional[RunTrace] = None,
 ) -> RunResult:
     """Manual mode: create + save the ticket, then stop for the Review Desk.
 
     Nothing is dispatched or executed automatically.
     """
-    trace = RunTrace(
-        mode=WorkflowMode.manual,
-        request=user_request,
+    trace = _new_trace(
+        WorkflowMode.manual,
+        user_request=user_request,
         project_key=project_key,
-        started_at=_iso_now(),
+        trace=trace,
     )
 
     try:
@@ -356,17 +385,18 @@ def run_guided(
     api_key: str,
     model: str,
     extra_context: Optional[str] = None,
+    trace: Optional[RunTrace] = None,
 ) -> RunResult:
     """Guided mode: advance safe internal steps to a specialist output, then stop.
 
     Produces a ticket, handoff, and specialist output, but does not mark the
     ticket completed and does not generate follow-ups. Billy reviews the output.
     """
-    trace = RunTrace(
-        mode=WorkflowMode.guided,
-        request=user_request,
+    trace = _new_trace(
+        WorkflowMode.guided,
+        user_request=user_request,
         project_key=project_key,
-        started_at=_iso_now(),
+        trace=trace,
     )
 
     try:
@@ -418,6 +448,7 @@ def run_auto(
     model: str,
     extra_context: Optional[str] = None,
     max_depth: int = 1,
+    trace: Optional[RunTrace] = None,
 ) -> RunResult:
     """Auto mode: run a safe depth-1 workflow and present the final candidate.
 
@@ -426,11 +457,11 @@ def run_auto(
     generate follow-up tickets by default — that only invites loops. Use the
     explicit "suggest follow-ups" action if you actually want next-step tickets.
     """
-    trace = RunTrace(
-        mode=WorkflowMode.auto,
-        request=user_request,
+    trace = _new_trace(
+        WorkflowMode.auto,
+        user_request=user_request,
         project_key=project_key,
-        started_at=_iso_now(),
+        trace=trace,
     )
 
     try:
@@ -479,8 +510,116 @@ def run_auto(
 
 
 # ---------------------------------------------------------------------------
+# Continuing a stopped run (resume in place)
+# ---------------------------------------------------------------------------
+
+
+# Steps that merely mark a stopping point; dropped when a run is resumed so the
+# trace reads as one continuous flow.
+_STOP_STEP_NAMES = {"await_review", "await_acceptance", "policy_gate"}
+
+
+def run_stage(result: RunResult) -> str:
+    """Classify how far a run has progressed.
+
+    Returns one of:
+        "no_ticket"  — nothing created yet (shouldn't normally happen)
+        "ticket"     — ticket exists, no specialist output yet
+        "output"     — specialist output exists; ready to accept
+    """
+    if result.output is not None:
+        return "output"
+    if result.ticket is not None:
+        return "ticket"
+    return "no_ticket"
+
+
+def can_continue(result: RunResult) -> bool:
+    """Whether there is a further automatic step to run from here.
+
+    A run can be continued when it has a ticket but no specialist output yet —
+    i.e. it stopped at a ticket (manual mode) or at the policy gate.
+    """
+    return run_stage(result) == "ticket"
+
+
+def _strip_trailing_stop_steps(trace: RunTrace) -> None:
+    """Remove trailing stop-marker steps so a resumed trace flows continuously."""
+    while trace.steps and trace.steps[-1].name in _STOP_STEP_NAMES:
+        trace.steps.pop()
+
+
+def continue_run(
+    result: RunResult,
+    *,
+    api_key: str,
+    model: str,
+) -> RunResult:
+    """Advance a stopped run to its specialist output, in place.
+
+    This is the explicit "continue" action: the user has chosen to proceed past
+    a stopping point (a manual-mode pause or a safety-policy gate), so the mode
+    policy is intentionally NOT re-checked here — the click is the consent the
+    policy was guarding for.
+
+    Reuses the same step helpers, appending to the existing trace.
+    """
+    if not can_continue(result):
+        return result
+
+    trace = result.trace
+    envelope = result.ticket
+
+    _strip_trailing_stop_steps(trace)
+    trace.final_status = "running"
+    trace.stop_reason = ""
+
+    try:
+        packet = _step_generate_and_save_handoff(
+            trace, envelope=envelope, api_key=api_key, model=model
+        )
+        output = _step_run_and_save_specialist(
+            trace, packet=packet, api_key=api_key, model=model
+        )
+    except Exception as exc:
+        _add_step(trace, "run", RunStepStatus.failed, message=str(exc))
+        _finish(trace, final_status="failed", stop_reason=str(exc))
+        return RunResult(trace=trace, ticket=envelope)
+
+    _add_step(
+        trace,
+        "await_acceptance",
+        RunStepStatus.waiting_for_review,
+        message="Final candidate ready. Accept it to save the deliverable.",
+    )
+    _finish(
+        trace,
+        final_status="stopped_for_review",
+        stop_reason="Accept the final candidate to save the deliverable.",
+    )
+
+    return RunResult(trace=trace, ticket=envelope, output=output)
+
+
+# ---------------------------------------------------------------------------
 # Accepting a final deliverable
 # ---------------------------------------------------------------------------
+
+
+class AcceptResult:
+    """Outcome of accepting a specialist output as a final deliverable."""
+
+    def __init__(
+        self,
+        *,
+        deliverable: Deliverable,
+        artifact_path: str,
+        closed_ticket_id: Optional[str] = None,
+    ) -> None:
+        self.deliverable = deliverable
+        self.artifact_path = artifact_path
+        # The ticket that was moved to completed, if any.
+        self.closed_ticket_id = closed_ticket_id
 
 
 def accept_output_as_deliverable(
@@ -489,15 +628,19 @@ def accept_output_as_deliverable(
     filename: Optional[str] = None,
     note: str = "",
     root_ticket_id: Optional[str] = None,
-) -> tuple[Deliverable, str]:
+    close_ticket: bool = True,
+) -> AcceptResult:
     """Materialize an accepted specialist output as a final deliverable file.
 
     Writes the output's deliverable content verbatim to deliverables/ using the
     resolved filename, plus a sidecar record. This is the "done" action: it turns
     a candidate into a real, usable file.
 
+    When close_ticket is True and the output is linked to a source ticket, that
+    ticket is moved to `completed` — the deliverable is the proof of completion.
+
     Returns:
-        (deliverable, artifact_path)
+        AcceptResult
     """
     deliverable = deliverable_from_output(
         output,
@@ -508,7 +651,18 @@ def accept_output_as_deliverable(
 
     artifact_path, _ = save_deliverable(deliverable)
 
-    return deliverable, str(artifact_path)
+    closed_ticket_id: Optional[str] = None
+    if close_ticket and output.source_ticket_id:
+        ticket_path = find_ticket_path_by_id(output.source_ticket_id)
+        if ticket_path is not None:
+            update_ticket_status(ticket_path, TicketStatus.completed)
+            closed_ticket_id = output.source_ticket_id
+
+    return AcceptResult(
+        deliverable=deliverable,
+        artifact_path=str(artifact_path),
+        closed_ticket_id=closed_ticket_id,
+    )
 
 
 # ---------------------------------------------------------------------------

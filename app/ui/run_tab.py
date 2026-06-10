@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import time
+
 import streamlit as st
 
 from mica import create_followup_ticket_batch_from_output
+from run_manager import get_run, start_continue, start_run
 from schemas import SpecialistType, WorkflowMode
 from storage import save_followup_ticket_batch, save_specialist_output
 from ui.common import (
@@ -14,10 +17,16 @@ from ui.common import (
 )
 from workflows import (
     allowed_modes_for,
-    run_auto,
-    run_guided,
-    run_manual,
+    can_continue,
 )
+
+
+# How often the Run tab re-polls a background run, in seconds.
+_POLL_INTERVAL = 1.0
+
+# Cap consecutive auto-refreshes so the rerun loop can never run away; after this
+# many polls (~minutes), fall back to a manual refresh button.
+_MAX_AUTO_POLLS = 600
 
 
 MODE_LABELS = {
@@ -27,16 +36,9 @@ MODE_LABELS = {
 }
 
 MODE_HELP = {
-    WorkflowMode.manual: "Create the ticket, then stop. Continue in the Review Desk.",
+    WorkflowMode.manual: "Create the ticket, then stop. Continue here when ready.",
     WorkflowMode.guided: "Advance to a specialist output, then stop for review.",
-    WorkflowMode.auto: "Run depth-1 and present the final candidate plus suggested follow-ups.",
-}
-
-# Dispatchers per mode.
-_RUNNERS = {
-    WorkflowMode.manual: run_manual,
-    WorkflowMode.guided: run_guided,
-    WorkflowMode.auto: run_auto,
+    WorkflowMode.auto: "Run to the final candidate, then stop for acceptance.",
 }
 
 
@@ -95,41 +97,90 @@ def render_run_tab(
         if mode not in allowed:
             allowed_str = ", ".join(sorted(m.value for m in allowed))
             st.warning(
-                f"Policy: `{specialist.value}` may not run in `{mode.value}` mode "
-                f"(allowed: {allowed_str}). The ticket will still be created, then "
-                "the run will stop for the Review Desk."
+                f"Policy: `{specialist.value}` won't auto-run in `{mode.value}` mode "
+                f"(allowed: {allowed_str}). The ticket will be created and the run "
+                "will pause — you can then click **Continue** to finish here."
             )
 
-    if st.button("Run", type="primary", use_container_width=True):
+    active_handle = get_run(st.session_state.get("active_run_id"))
+    run_in_progress = active_handle is not None and active_handle.is_running
+
+    if st.button(
+        "Run",
+        type="primary",
+        use_container_width=True,
+        disabled=run_in_progress,
+    ):
         if not request.strip():
             st.warning("Please enter a request first.")
         else:
-            runner = _RUNNERS[mode]
             resolved_context = _build_context(extra_context, specialist_hint)
+            run_id = start_run(
+                mode=mode,
+                user_request=request,
+                project_key=project_key,
+                api_key=st.secrets["OPENAI_API_KEY"],
+                model=model,
+                extra_context=resolved_context,
+            )
+            st.session_state.active_run_id = run_id
+            st.session_state.active_run_polls = 0
+            # A new run supersedes any previous result and follow-up batch.
+            st.session_state.last_run_result = None
+            st.session_state.last_followup_batch = None
+            st.rerun()
 
-            try:
-                with st.spinner(f"Running in {mode.value} mode..."):
-                    result = runner(
-                        user_request=request,
-                        project_key=project_key,
-                        api_key=st.secrets["OPENAI_API_KEY"],
-                        model=model,
-                        extra_context=resolved_context,
-                    )
-                st.session_state.last_run_result = result
-
-                if result.trace.final_status == "failed":
-                    st.error("Run failed. See the trace below.")
-                else:
-                    st.success(f"Run finished: {result.trace.final_status}.")
-            except Exception as e:
-                st.error("Run failed.")
-                st.exception(e)
+    # Surface a background run: live trace while running, promote on completion.
+    _render_active_run(model=model)
 
     result = st.session_state.get("last_run_result")
 
     if result is not None:
         _render_result(result, model=model)
+
+
+def _render_active_run(*, model: str) -> None:
+    """Render the in-flight background run, if any, and auto-refresh until done.
+
+    Promotes a finished run's result into last_run_result so the rest of the tab
+    renders it normally.
+    """
+    handle = get_run(st.session_state.get("active_run_id"))
+    if handle is None:
+        return
+
+    if handle.is_running:
+        st.divider()
+        st.markdown("### Run in progress")
+        st.caption(
+            "This keeps running in the background. You can switch views and come "
+            "back — it won't stop."
+        )
+        with st.status("Working…", expanded=True):
+            render_run_trace(handle.trace, expanded=True)
+
+        # Auto-refresh to pick up new steps, but bound it so the rerun loop can
+        # never run away. After the ceiling, fall back to a manual refresh.
+        polls = st.session_state.get("active_run_polls", 0)
+        if polls < _MAX_AUTO_POLLS:
+            st.session_state.active_run_polls = polls + 1
+            time.sleep(_POLL_INTERVAL)
+            st.rerun()
+        else:
+            st.caption("Still running. Refresh to check for updates.")
+            if st.button("Refresh now", key="run_refresh"):
+                st.session_state.active_run_polls = 0
+                st.rerun()
+        return
+
+    # Finished: promote result or surface error, then forget the active id.
+    if handle.status == "error":
+        st.error(f"Run failed: {handle.error}")
+    elif handle.result is not None:
+        st.session_state.last_run_result = handle.result
+
+    st.session_state.active_run_id = None
+    st.session_state.active_run_polls = 0
 
 
 def _build_context(extra_context: str, specialist_hint: str) -> str:
@@ -166,10 +217,28 @@ def _render_result(result, *, model: str) -> None:
                 path = save_specialist_output(result.output)
                 st.success(f"Saved to: `{path}`")
     elif result.ticket is not None:
-        st.caption(
-            "Manual mode produced a ticket only. Continue in the Review Desk."
-        )
         render_ticket_summary(result.ticket, show_status=True)
+
+        if can_continue(result):
+            st.info(result.trace.stop_reason or "The run paused at the ticket.")
+            st.caption(
+                "Continue to generate the handoff and run the specialist, without "
+                "leaving this tab."
+            )
+            if st.button(
+                "Continue ▶",
+                type="primary",
+                use_container_width=True,
+                key="run_continue",
+            ):
+                run_id = start_continue(
+                    result=result,
+                    api_key=st.secrets["OPENAI_API_KEY"],
+                    model=model,
+                )
+                st.session_state.active_run_id = run_id
+                st.session_state.active_run_polls = 0
+                st.rerun()
     else:
         st.info("No candidate was produced. See the trace for what happened.")
 

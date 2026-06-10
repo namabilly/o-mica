@@ -80,6 +80,8 @@ def init_session_state() -> None:
         "last_selected_output": None,
         "last_selected_graph_ticket": None,
         "last_run_result": None,
+        "active_run_id": None,
+        "active_run_polls": 0,
     }
 
     for key, value in defaults.items():
@@ -87,9 +89,22 @@ def init_session_state() -> None:
             st.session_state[key] = value
 
 
-def render_sidebar() -> tuple[str, str]:
+def render_sidebar() -> tuple[str, str, str]:
     with st.sidebar:
-        st.header("Settings")
+        st.markdown("### 丞相台")
+
+        view = st.radio(
+            "View",
+            options=["Run / 执行", "Advanced / 工房"],
+            index=0,
+            key="app_view",
+            help=(
+                "Run is the one-shot flow. Advanced exposes the step-by-step "
+                "control panels (create, review, dispatch, specialists, graph)."
+            ),
+        )
+
+        st.divider()
 
         project_key = st.selectbox(
             "Project context",
@@ -102,114 +117,74 @@ def render_sidebar() -> tuple[str, str]:
             value=st.secrets.get("OPENAI_MODEL", "gpt-5.2"),
         )
 
-        st.divider()
-
-        st.markdown("### Workflow")
-        st.markdown(
-            """
-            **Run**
-            One-shot: request → mode (manual/guided/auto) → candidate + trace.
-
-            **New Edict**
-            Turn messy intent into a ticket.
-
-            **Review Desk**  
-            Approve, revise, reject, or move tickets.
-
-            **Dispatch**  
-            Prepare specialist handoff packets.
-
-            **Specialist Desk**  
-            Run universal specialists on approved handoff packets.
-
-            **Output Review**  
-            Turn specialist outputs into follow-up ticket batches.
-
-            **Task Graph**  
-            Inspect parent, root, child, and initiative-level ticket relationships.
-            """
-        )
-
-    return project_key, model
+    return project_key, model, view
 
 
-def render_ticket_metrics(envelope: TicketEnvelope, *, show_status: bool = True) -> None:
-    ticket = envelope.ticket
-
+def _badge_line(ticket, *, show_status: bool = True) -> str:
+    """One compact line of `key: value` chips for a ticket."""
+    parts = []
     if show_status:
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Status", ticket.status.value)
-        c2.metric("Category", ticket.category.value)
-        c3.metric("Priority", ticket.priority.value)
-    else:
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Category", ticket.category.value)
-        c2.metric("Priority", ticket.priority.value)
-        c3.metric("Review", "Required" if ticket.human_review_required else "Optional")
-
-
-def render_ticket_lineage(envelope: TicketEnvelope) -> None:
-    ticket = envelope.ticket
-
-    with st.expander("Lineage / Task Graph"):
-        st.write(f"**Ticket ID:** `{ticket.ticket_id}`")
-        st.write(f"**Parent Ticket ID:** `{ticket.parent_ticket_id or 'None'}`")
-        st.write(f"**Root Ticket ID:** `{ticket.root_ticket_id or 'None'}`")
-        st.write(f"**Source Output ID:** `{ticket.source_output_id or 'None'}`")
-
-        st.write("**Child Ticket IDs:**")
-        if ticket.child_ticket_ids:
-            for child_id in ticket.child_ticket_ids:
-                st.write(f"- `{child_id}`")
-        else:
-            st.write("- None")
+        parts.append(f"`{ticket.status.value}`")
+    parts.append(f"{ticket.priority.value} priority")
+    parts.append(f"{safe_enum_value(ticket.specialist_type)}/{safe_enum_value(ticket.domain_type)}")
+    parts.append(f"`{ticket.category.value}`")
+    return " · ".join(parts)
 
 
 def render_ticket_summary(envelope: TicketEnvelope, *, show_status: bool = True) -> None:
+    """Compact ticket card: title, badges, objective, next action.
+
+    Everything verbose lives in render_ticket_details behind expanders.
+    """
     ticket = envelope.ticket
 
-    st.markdown(f"## {ticket.title}")
-    render_ticket_metrics(envelope, show_status=show_status)
+    st.markdown(f"#### {ticket.title}")
+    st.caption(_badge_line(ticket, show_status=show_status))
 
-    c1, c2 = st.columns(2)
-    c1.metric("Specialist Type", safe_enum_value(ticket.specialist_type))
-    c2.metric("Domain Type", safe_enum_value(ticket.domain_type))
-
-    st.markdown("### Objective")
+    st.markdown("**Objective**")
     st.write(ticket.objective)
 
-    st.markdown("### Context")
-    st.write(ticket.context)
-
-    st.markdown("### Next Action")
+    st.markdown("**Next action**")
     st.write(ticket.next_action)
-
-    st.markdown("### Recommended Specialist")
-    st.write(ticket.recommended_specialist or "None")
 
 
 def render_ticket_details(envelope: TicketEnvelope) -> None:
+    """All the verbose ticket fields, folded into two expanders."""
     ticket = envelope.ticket
 
-    render_ticket_lineage(envelope)
+    with st.expander("Details"):
+        st.markdown("**Context**")
+        st.write(ticket.context or "None")
 
-    with st.expander("Assumptions"):
+        st.markdown("**Recommended specialist**")
+        st.write(ticket.recommended_specialist or "None")
+
+        st.markdown("**Assumptions**")
         st.write(ticket.assumptions or ["None"])
 
-    with st.expander("Missing Information"):
+        st.markdown("**Missing information**")
         st.write(ticket.missing_information or ["None"])
 
-    with st.expander("Risks"):
+        st.markdown("**Risks**")
         st.write(ticket.risks or ["None"])
 
-    with st.expander("Full Markdown"):
-        st.code(ticket_to_markdown(envelope), language="markdown")
+        st.markdown("**Lineage**")
+        st.write(f"- Ticket: `{ticket.ticket_id}`")
+        st.write(f"- Parent: `{ticket.parent_ticket_id or 'None'}`")
+        st.write(f"- Root: `{ticket.root_ticket_id or 'None'}`")
+        st.write(f"- Source output: `{ticket.source_output_id or 'None'}`")
+        if ticket.child_ticket_ids:
+            st.write("- Children: " + ", ".join(f"`{c}`" for c in ticket.child_ticket_ids))
 
-    with st.expander("Raw JSON"):
-        st.code(
-            json.dumps(envelope.model_dump(), indent=2, ensure_ascii=False),
-            language="json",
-        )
+    with st.expander("Inspect (raw)"):
+        tab_md, tab_json = st.tabs(["Markdown", "JSON"])
+        with tab_md:
+            st.code(ticket_to_markdown(envelope), language="markdown")
+        with tab_json:
+            st.code(
+                json.dumps(envelope.model_dump(), indent=2, ensure_ascii=False),
+                language="json",
+            )
 
 
 def render_dashboard(folders: list[str]) -> None:
@@ -337,48 +312,45 @@ def select_specialist_output_ui(prefix: str, implemented_specialists: list):
 
 
 def render_specialist_output(output: SpecialistOutput, key_prefix: str = "") -> None:
-    """Render a SpecialistOutput."""
+    """Render a SpecialistOutput, leading with the deliverable itself.
+
+    The deliverable is the thing Billy wants; meta (assumptions, risks, lineage)
+    and raw dumps are folded into two expanders below it.
+    """
     suggested_followup_tickets = getattr(output, "suggested_followup_tickets", [])
 
-    st.divider()
-    st.markdown(f"## {output.title}")
+    st.markdown(f"#### {output.title}")
+    badges = [
+        f"{safe_enum_value(output.specialist_type)}/{safe_enum_value(output.domain_type)}"
+    ]
+    if getattr(output, "deliverable_filename", None):
+        badges.append(f"`{output.deliverable_filename}`")
+    st.caption(" · ".join(badges))
 
-    c1, c2 = st.columns(2)
-    c1.metric("Specialist", safe_enum_value(output.specialist_type))
-    c2.metric("Domain", safe_enum_value(output.domain_type))
+    if output.summary:
+        st.caption(output.summary)
 
-    with st.expander("Source / Lineage", expanded=False):
-        st.write(f"**Output ID:** `{output.output_id}`")
-        st.write(f"**Source Ticket ID:** `{output.source_ticket_id or 'None'}`")
-        st.write(f"**Source Handoff ID:** `{output.source_handoff_id or 'None'}`")
-
-    st.markdown("### Summary")
-    st.write(output.summary)
-
-    st.markdown("### Deliverable")
+    # The deliverable, front and center.
     st.markdown(output.deliverable)
 
-    with st.expander("Assumptions"):
+    with st.expander("Details & meta"):
+        st.markdown("**Assumptions**")
         st.write(output.assumptions or ["None"])
-
-    with st.expander("Risks"):
+        st.markdown("**Risks**")
         st.write(output.risks or ["None"])
-
-    with st.expander("Next Steps"):
+        st.markdown("**Next steps**")
         st.write(output.next_steps or ["None"])
-
-    with st.expander("Review Questions"):
+        st.markdown("**Review questions**")
         st.write(output.review_questions or ["None"])
-
-    with st.expander("Suggested Follow-up Tickets"):
+        st.markdown("**Suggested follow-up tickets**")
         st.write(suggested_followup_tickets or ["None"])
+        st.markdown("**Lineage**")
+        st.write(f"- Output: `{output.output_id}`")
+        st.write(f"- Source ticket: `{output.source_ticket_id or 'None'}`")
+        st.write(f"- Source handoff: `{output.source_handoff_id or 'None'}`")
 
-    st.text_area(
-        "Copy full specialist output as Markdown",
-        value=specialist_output_to_markdown(output),
-        height=480,
-        key=f"specialist_output_markdown_{key_prefix}{output.output_id}",
-    )
+    with st.expander("Inspect (raw)"):
+        st.code(specialist_output_to_markdown(output), language="markdown")
 
 
 def _guess_filename(output) -> str:
@@ -418,6 +390,19 @@ def render_accept_deliverable(output, *, key_prefix: str = "") -> None:
         key=f"{key_prefix}deliverable_note_{output.output_id}",
     )
 
+    has_ticket = bool(getattr(output, "source_ticket_id", None))
+    close_ticket = st.checkbox(
+        "Mark source ticket completed",
+        value=has_ticket,
+        disabled=not has_ticket,
+        help=(
+            f"Move ticket `{output.source_ticket_id}` to completed."
+            if has_ticket
+            else "This output has no linked source ticket."
+        ),
+        key=f"{key_prefix}deliverable_close_{output.output_id}",
+    )
+
     # Always offer the raw content for download, even before saving.
     st.download_button(
         "Download deliverable",
@@ -434,12 +419,15 @@ def render_accept_deliverable(output, *, key_prefix: str = "") -> None:
         use_container_width=True,
         key=f"{key_prefix}deliverable_accept_{output.output_id}",
     ):
-        deliverable, artifact_path = accept_output_as_deliverable(
+        accept = accept_output_as_deliverable(
             output=output,
             filename=filename or None,
             note=note,
+            close_ticket=close_ticket,
         )
-        st.success(f"Saved final deliverable to: `{artifact_path}`")
+        st.success(f"Saved final deliverable to: `{accept.artifact_path}`")
+        if accept.closed_ticket_id:
+            st.success(f"Ticket `{accept.closed_ticket_id}` marked completed.")
 
 
 _RUN_STEP_ICONS = {
