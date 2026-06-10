@@ -7,9 +7,11 @@ from pathlib import Path
 from typing import List, Optional
 
 from schemas import (
+    FollowupTicketBatch,
     ReviewDecision,
     ReviewRecord,
     SpecialistOutput,
+    TicketContextBundle,
     TicketEnvelope,
     TicketStatus,
 )
@@ -117,9 +119,6 @@ def ticket_to_markdown(envelope: TicketEnvelope) -> str:
     """Render a TicketEnvelope as a human-readable Markdown document."""
     t = envelope.ticket
 
-    specialist_type = _safe_attr(t, "specialist_type", None)
-    domain_type = _safe_attr(t, "domain_type", None)
-
     review_history = "\n".join(
         f"- {r.timestamp or 'unknown time'} — {r.decision.value}: {r.note or 'No note'}"
         for r in t.review_history
@@ -127,8 +126,23 @@ def ticket_to_markdown(envelope: TicketEnvelope) -> str:
 
     return f"""# {t.title}
 
+## Ticket ID
+{t.ticket_id}
+
 ## Status
 {t.status.value}
+
+## Parent Ticket ID
+{t.parent_ticket_id or "None"}
+
+## Root Ticket ID
+{t.root_ticket_id or "None"}
+
+## Source Output ID
+{t.source_output_id or "None"}
+
+## Child Ticket IDs
+{_bullets(t.child_ticket_ids)}
 
 ## Category
 {t.category.value}
@@ -137,10 +151,10 @@ def ticket_to_markdown(envelope: TicketEnvelope) -> str:
 {t.priority.value}
 
 ## Specialist Type
-{_safe_enum_value(specialist_type)}
+{_safe_enum_value(t.specialist_type)}
 
 ## Domain Type
-{_safe_enum_value(domain_type)}
+{_safe_enum_value(t.domain_type)}
 
 ## Objective
 {t.objective}
@@ -217,7 +231,7 @@ def write_ticket_files(envelope: TicketEnvelope, json_path: Path) -> tuple[Path,
 def save_ticket(envelope: TicketEnvelope) -> tuple[Path, Path]:
     """Save a new ticket to the folder matching its current status.
 
-    Generates a timestamped filename.
+    Generates a timestamped filename containing the stable ticket_id.
 
     Returns:
         (json_path, md_path)
@@ -228,7 +242,7 @@ def save_ticket(envelope: TicketEnvelope) -> tuple[Path, Path]:
     target_dir = TICKETS_DIR / folder
 
     slug = slugify(envelope.ticket.title)
-    base = f"{timestamp_now()}-{slug}"
+    base = f"{timestamp_now()}-{envelope.ticket.ticket_id}-{slug}"
 
     json_path = target_dir / f"{base}.json"
 
@@ -264,6 +278,50 @@ def list_ticket_json_files(folder: Optional[str] = None) -> List[Path]:
             files.extend(child.glob("*.json"))
 
     return sorted(files, reverse=True)
+
+
+def find_ticket_path_by_id(ticket_id: str) -> Optional[Path]:
+    """Find a ticket JSON file by ticket_id across all ticket folders."""
+    for path in list_ticket_json_files():
+        try:
+            envelope = load_ticket(path)
+        except Exception:
+            continue
+
+        if envelope.ticket.ticket_id == ticket_id:
+            return path
+
+    return None
+
+
+def load_ticket_by_id(ticket_id: str) -> Optional[TicketEnvelope]:
+    """Load a ticket by ticket_id, if found."""
+    path = find_ticket_path_by_id(ticket_id)
+
+    if path is None:
+        return None
+
+    return load_ticket(path)
+
+
+def link_child_ticket(parent_ticket_id: str, child_ticket_id: str) -> bool:
+    """Add child_ticket_id to the parent's child_ticket_ids.
+
+    Returns:
+        True if parent was found and updated.
+    """
+    parent_path = find_ticket_path_by_id(parent_ticket_id)
+
+    if parent_path is None:
+        return False
+
+    parent = load_ticket(parent_path)
+
+    if child_ticket_id not in parent.ticket.child_ticket_ids:
+        parent.ticket.child_ticket_ids.append(child_ticket_id)
+        overwrite_ticket(parent_path, parent)
+
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -372,17 +430,17 @@ def save_handoff_packet(envelope: TicketEnvelope, packet_md: str) -> Path:
     target_dir = TICKETS_DIR / folder
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    slug = slugify(envelope.ticket.title)
-
+    ticket_id = envelope.ticket.ticket_id
     existing = sorted(
-        target_dir.glob(f"*{slug}*.json"),
+        target_dir.glob(f"*{ticket_id}*.json"),
         reverse=True,
     )
 
     if existing:
         base = existing[0].stem
     else:
-        base = f"{timestamp_now()}-{slug}"
+        slug = slugify(envelope.ticket.title)
+        base = f"{timestamp_now()}-{ticket_id}-{slug}"
 
     packet_path = target_dir / f"{base}-handoff.md"
     packet_path.write_text(packet_md, encoding="utf-8")
@@ -397,16 +455,29 @@ def save_handoff_packet(envelope: TicketEnvelope, packet_md: str) -> Path:
 
 def specialist_output_to_markdown(output: SpecialistOutput) -> str:
     """Render a SpecialistOutput as Markdown."""
-    domain_type = _safe_attr(output, "domain_type", None)
     suggested_followup_tickets = _safe_attr(output, "suggested_followup_tickets", [])
 
+    review_history = "\n".join(
+        f"- {r.timestamp or 'unknown time'} — {r.decision.value}: {r.note or 'No note'}"
+        for r in _safe_attr(output, "review_history", [])
+    ) or "- None"
+
     return f"""# {output.title}
+
+## Output ID
+{output.output_id}
+
+## Source Ticket ID
+{output.source_ticket_id or "None"}
+
+## Source Handoff ID
+{output.source_handoff_id or "None"}
 
 ## Specialist
 {_safe_enum_value(output.specialist_type)}
 
 ## Domain
-{_safe_enum_value(domain_type)}
+{_safe_enum_value(output.domain_type)}
 
 ## Summary
 {output.summary}
@@ -428,6 +499,9 @@ def specialist_output_to_markdown(output: SpecialistOutput) -> str:
 
 ## Suggested Follow-up Tickets
 {_bullets(suggested_followup_tickets)}
+
+## Review History
+{review_history}
 """
 
 
@@ -448,7 +522,7 @@ def save_specialist_output(output: SpecialistOutput) -> Path:
     target_dir.mkdir(parents=True, exist_ok=True)
 
     slug = slugify(output.title)
-    base = f"{timestamp_now()}-{slug}"
+    base = f"{timestamp_now()}-{output.output_id}-{slug}"
 
     md_path = target_dir / f"{base}.md"
     json_path = target_dir / f"{base}.json"
@@ -492,3 +566,126 @@ def load_specialist_output_json(path: Path) -> SpecialistOutput:
     """Load a SpecialistOutput from a JSON file."""
     data = json.loads(path.read_text(encoding="utf-8"))
     return SpecialistOutput.model_validate(data)
+
+
+def find_specialist_output_path_by_id(output_id: str) -> Optional[Path]:
+    """Find a specialist output JSON file by output_id."""
+    ensure_output_dirs()
+
+    for child in OUTPUTS_DIR.iterdir():
+        if not child.is_dir():
+            continue
+
+        for path in child.glob("*.json"):
+            try:
+                output = load_specialist_output_json(path)
+            except Exception:
+                continue
+
+            if output.output_id == output_id:
+                return path
+
+    return None
+
+
+def load_specialist_output_by_id(output_id: str) -> Optional[SpecialistOutput]:
+    """Load a SpecialistOutput by output_id, if found."""
+    path = find_specialist_output_path_by_id(output_id)
+
+    if path is None:
+        return None
+
+    return load_specialist_output_json(path)
+
+
+# ---------------------------------------------------------------------------
+# Follow-up ticket batches
+# ---------------------------------------------------------------------------
+
+
+def save_followup_ticket_batch(
+    batch: FollowupTicketBatch,
+    selected_indices: Optional[list[int]] = None,
+) -> list[Path]:
+    """Save selected tickets from a FollowupTicketBatch.
+
+    Also links saved child tickets to the parent ticket when possible.
+
+    Returns:
+        List of saved JSON paths.
+    """
+    saved_paths: list[Path] = []
+
+    if selected_indices is None:
+        selected_indices = list(range(len(batch.tickets)))
+
+    for idx in selected_indices:
+        if idx < 0 or idx >= len(batch.tickets):
+            continue
+
+        envelope = batch.tickets[idx]
+
+        # Enforce lineage in storage layer.
+        envelope.ticket.parent_ticket_id = batch.parent_ticket_id
+        envelope.ticket.root_ticket_id = batch.root_ticket_id or batch.parent_ticket_id
+        envelope.ticket.source_output_id = batch.source_output_id
+        envelope.ticket.status = TicketStatus.drafted
+
+        json_path, _ = save_ticket(envelope)
+        saved_paths.append(json_path)
+
+        if batch.parent_ticket_id:
+            link_child_ticket(
+                parent_ticket_id=batch.parent_ticket_id,
+                child_ticket_id=envelope.ticket.ticket_id,
+            )
+
+    return saved_paths
+
+
+# ---------------------------------------------------------------------------
+# Context bundles
+# ---------------------------------------------------------------------------
+
+
+def load_ticket_context_bundle(ticket_id: str) -> Optional[TicketContextBundle]:
+    """Load a ticket with its local task-graph context.
+
+    Includes:
+    - current ticket
+    - direct parent ticket
+    - root ticket
+    - source specialist output
+    - direct child tickets
+    """
+    current = load_ticket_by_id(ticket_id)
+
+    if current is None:
+        return None
+
+    parent = None
+    root = None
+    source_output = None
+    children: list[TicketEnvelope] = []
+
+    if current.ticket.parent_ticket_id:
+        parent = load_ticket_by_id(current.ticket.parent_ticket_id)
+
+    if current.ticket.root_ticket_id:
+        root = load_ticket_by_id(current.ticket.root_ticket_id)
+
+    if current.ticket.source_output_id:
+        source_output = load_specialist_output_by_id(current.ticket.source_output_id)
+
+    for child_id in current.ticket.child_ticket_ids:
+        child = load_ticket_by_id(child_id)
+        if child is not None:
+            children.append(child)
+
+    return TicketContextBundle(
+        current_ticket=current,
+        parent_ticket=parent,
+        root_ticket=root,
+        source_output=source_output,
+        child_tickets=children,
+    )

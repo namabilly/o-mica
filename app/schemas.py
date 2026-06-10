@@ -1,8 +1,32 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import List, Optional, Literal
+from typing import List, Optional
+from uuid import uuid4
+
 from pydantic import BaseModel, Field
+
+
+# ---------------------------------------------------------------------------
+# ID helpers
+# ---------------------------------------------------------------------------
+
+
+def new_ticket_id() -> str:
+    return f"ticket_{uuid4().hex[:12]}"
+
+
+def new_output_id() -> str:
+    return f"output_{uuid4().hex[:12]}"
+
+
+def new_handoff_id() -> str:
+    return f"handoff_{uuid4().hex[:12]}"
+
+
+# ---------------------------------------------------------------------------
+# Core enums
+# ---------------------------------------------------------------------------
 
 
 class TaskCategory(str, Enum):
@@ -43,19 +67,6 @@ class DomainType(str, Enum):
     admin = "admin"
 
 
-class SpecialistOutput(BaseModel):
-    title: str
-    specialist_type: SpecialistType
-    domain_type: DomainType
-    summary: str
-    deliverable: str
-    assumptions: list[str] = Field(default_factory=list)
-    risks: list[str] = Field(default_factory=list)
-    next_steps: list[str] = Field(default_factory=list)
-    review_questions: list[str] = Field(default_factory=list)
-    suggested_followup_tickets: list[str] = Field(default_factory=list)
-
-
 class TicketStatus(str, Enum):
     drafted = "drafted"
     under_review = "under_review"
@@ -75,21 +86,71 @@ class ReviewDecision(str, Enum):
     archive_only = "archive_only"
 
 
+# Optional: for reviewing specialist outputs later.
+class OutputReviewDecision(str, Enum):
+    accept = "accept"
+    accept_with_changes = "accept_with_changes"
+    needs_revision = "needs_revision"
+    reject = "reject"
+    convert_to_tickets = "convert_to_tickets"
+    archive = "archive"
+
+
+# ---------------------------------------------------------------------------
+# Review records
+# ---------------------------------------------------------------------------
+
+
 class ReviewRecord(BaseModel):
     decision: ReviewDecision
     note: str = ""
     timestamp: Optional[str] = None
 
 
+class OutputReviewRecord(BaseModel):
+    decision: OutputReviewDecision
+    note: str = ""
+    timestamp: Optional[str] = None
 
+
+# ---------------------------------------------------------------------------
+# Tickets
+# ---------------------------------------------------------------------------
 
 
 class TaskTicket(BaseModel):
+    # Stable identity
+    ticket_id: str = Field(default_factory=new_ticket_id)
+
+    # Task graph lineage
+    parent_ticket_id: Optional[str] = Field(
+        default=None,
+        description="Direct parent ticket that led to this ticket, if any.",
+    )
+    root_ticket_id: Optional[str] = Field(
+        default=None,
+        description="Original root ticket for this task chain, if any.",
+    )
+    source_output_id: Optional[str] = Field(
+        default=None,
+        description="Specialist output that generated this ticket, if any.",
+    )
+    child_ticket_ids: List[str] = Field(
+        default_factory=list,
+        description="Follow-up tickets created from this ticket.",
+    )
+
+    # Ticket metadata
     title: str = Field(description="Short actionable title.")
     category: TaskCategory
     priority: Priority = Field(description="Estimated priority.")
     status: TicketStatus = TicketStatus.drafted
 
+    # Routing metadata
+    specialist_type: SpecialistType = SpecialistType.planner
+    domain_type: DomainType = DomainType.general
+
+    # Main task content
     objective: str = Field(description="What should be accomplished.")
     context: str = Field(description="Relevant project/user context.")
     assumptions: List[str] = Field(default_factory=list)
@@ -99,8 +160,6 @@ class TaskTicket(BaseModel):
         default=None,
         description="Suggested future specialist agent, if any.",
     )
-    specialist_type: SpecialistType = SpecialistType.planner
-    domain_type: DomainType = DomainType.general
 
     next_action: str = Field(description="The immediate next action.")
     human_review_required: bool = True
@@ -112,12 +171,12 @@ class TaskTicket(BaseModel):
 
     handoff_prompt: Optional[str] = Field(
         default=None,
-        description="Prompt that can be given to the recommended specialist."
+        description="Prompt that can be given to the recommended specialist.",
     )
 
     archive_notes: Optional[str] = Field(
         default=None,
-        description="What should be saved to memory if this ticket is approved."
+        description="What should be saved to memory if this ticket is approved.",
     )
 
     review_history: List[ReviewRecord] = Field(default_factory=list)
@@ -127,11 +186,11 @@ class TicketEnvelope(BaseModel):
     ticket: TaskTicket
     review_questions: List[str] = Field(
         default_factory=list,
-        description="Only questions that are truly useful for Billy to answer."
+        description="Only questions that are truly useful for Billy to answer.",
     )
     suggested_user_reply: Optional[str] = Field(
         default=None,
-        description="A short reply Billy can give to move the task forward."
+        description="A short reply Billy can give to move the task forward.",
     )
 
 
@@ -141,16 +200,94 @@ class TicketRevisionRequest(BaseModel):
     review_note: str = ""
 
 
+# ---------------------------------------------------------------------------
+# Handoff packets
+# ---------------------------------------------------------------------------
+
+
 class HandoffPacket(BaseModel):
+    handoff_id: str = Field(default_factory=new_handoff_id)
+
     title: str
     specialist_type: SpecialistType
     domain_type: DomainType
+
+    # Source linkage
+    source_ticket_id: Optional[str] = None
+    source_ticket_title: str
+
     task: str
     context: str
-    constraints: list[str] = []
+    constraints: List[str] = Field(default_factory=list)
     required_output: str
     quality_bar: str
     stop_condition: str
-    source_ticket_title: str
     handoff_prompt: str
 
+
+# ---------------------------------------------------------------------------
+# Specialist outputs
+# ---------------------------------------------------------------------------
+
+
+class SpecialistOutput(BaseModel):
+    output_id: str = Field(default_factory=new_output_id)
+
+    # Source linkage
+    source_ticket_id: Optional[str] = None
+    source_handoff_id: Optional[str] = None
+
+    title: str
+    specialist_type: SpecialistType
+    domain_type: DomainType
+
+    summary: str
+    deliverable: str
+    assumptions: List[str] = Field(default_factory=list)
+    risks: List[str] = Field(default_factory=list)
+    next_steps: List[str] = Field(default_factory=list)
+    review_questions: List[str] = Field(default_factory=list)
+    suggested_followup_tickets: List[str] = Field(default_factory=list)
+
+    review_history: List[OutputReviewRecord] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Follow-up ticket generation
+# ---------------------------------------------------------------------------
+
+
+class FollowupTicketBatch(BaseModel):
+    """A batch of proposed follow-up tickets generated from one specialist output.
+
+    These tickets should usually be previewed and manually selected before saving.
+    """
+
+    source_output_id: str
+    parent_ticket_id: Optional[str] = None
+    root_ticket_id: Optional[str] = None
+
+    coordination_notes: str = Field(
+        default="",
+        description="Notes about ordering, dependencies, or coordination across the generated tickets.",
+    )
+
+    tickets: List[TicketEnvelope] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Context bundle for future coordination
+# ---------------------------------------------------------------------------
+
+
+class TicketContextBundle(BaseModel):
+    """Context bundle for loading a ticket with its local task graph context.
+
+    Useful later when Mica needs to revise, dispatch, summarize, or coordinate a ticket.
+    """
+
+    current_ticket: TicketEnvelope
+    parent_ticket: Optional[TicketEnvelope] = None
+    root_ticket: Optional[TicketEnvelope] = None
+    source_output: Optional[SpecialistOutput] = None
+    child_tickets: List[TicketEnvelope] = Field(default_factory=list)
