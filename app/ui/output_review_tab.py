@@ -6,6 +6,7 @@ from mica import create_followup_ticket_batch_from_output
 from schemas import SpecialistType
 from storage import save_followup_ticket_batch
 from ui.common import (
+    render_accept_deliverable,
     render_followup_batch,
     render_specialist_output,
     select_specialist_output_ui,
@@ -34,8 +35,16 @@ def render_output_review_tab(
 
     render_specialist_output(output, key_prefix="review_")
 
+    # The primary acceptance path: save the artifact as a real final file.
+    st.divider()
+    render_accept_deliverable(output, key_prefix="review_")
+
     st.divider()
     st.markdown("### Generate Follow-up Tickets")
+    st.caption(
+        "Optional. Most 'produce X' outputs are done once accepted above. "
+        "Only generate follow-ups for genuinely separate next work."
+    )
 
     followup_instruction = st.text_area(
         "Follow-up instruction",

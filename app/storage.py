@@ -7,10 +7,12 @@ from pathlib import Path
 from typing import List, Optional
 
 from schemas import (
+    Deliverable,
     FollowupTicketBatch,
     HandoffPacket,
     ReviewDecision,
     ReviewRecord,
+    RunTrace,
     SpecialistOutput,
     TicketContextBundle,
     TicketEnvelope,
@@ -23,6 +25,8 @@ ROOT = Path(__file__).resolve().parents[1]
 TICKETS_DIR = ROOT / "tickets"
 HANDOFFS_DIR = ROOT / "handoffs"
 OUTPUTS_DIR = ROOT / "outputs"
+RUNS_DIR = ROOT / "runs"
+DELIVERABLES_DIR = ROOT / "deliverables"
 
 
 # Maps each ticket status to the subfolder it lives in under tickets/.
@@ -59,6 +63,16 @@ def ensure_output_dirs() -> None:
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def ensure_run_dirs() -> None:
+    """Create the root runs folder if it does not exist yet."""
+    RUNS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def ensure_deliverable_dirs() -> None:
+    """Create the root deliverables folder if it does not exist yet."""
+    DELIVERABLES_DIR.mkdir(parents=True, exist_ok=True)
+
+
 def slugify(text: str, max_len: int = 60) -> str:
     """Convert a title to a URL/filename-safe slug.
 
@@ -71,6 +85,34 @@ def slugify(text: str, max_len: int = 60) -> str:
     text = re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "-", text)
     text = text.strip("-")
     return text[:max_len] or "ticket"
+
+
+def safe_filename(name: str, *, default: str = "deliverable.md") -> str:
+    """Sanitize a model-suggested filename into a safe basename.
+
+    Strips any directory components and disallowed characters, while keeping a
+    single extension. Falls back to `default` if nothing usable remains.
+    """
+    # Drop any path components a model may have included.
+    name = name.replace("\\", "/").split("/")[-1].strip()
+
+    if not name:
+        return default
+
+    stem, dot, ext = name.rpartition(".")
+
+    if dot:
+        stem_part, ext_part = stem, ext
+    else:
+        stem_part, ext_part = name, ""
+
+    stem_part = re.sub(r"[^A-Za-z0-9._一-鿿-]+", "-", stem_part).strip("-.")
+    ext_part = re.sub(r"[^A-Za-z0-9]+", "", ext_part)
+
+    if not stem_part:
+        stem_part = "deliverable"
+
+    return f"{stem_part}.{ext_part}" if ext_part else stem_part
 
 
 def folder_for_status(status: TicketStatus) -> str:
@@ -833,4 +875,192 @@ def load_ticket_context_bundle(ticket_id: str) -> Optional[TicketContextBundle]:
         root_ticket=root,
         source_output=source_output,
         child_tickets=children,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Run traces
+# ---------------------------------------------------------------------------
+
+
+def run_trace_to_markdown(trace: RunTrace) -> str:
+    """Render a RunTrace as a human-readable Markdown document."""
+    steps = []
+
+    for i, step in enumerate(trace.steps, start=1):
+        artifact = ""
+        if step.artifact_id or step.artifact_path:
+            artifact = (
+                f"\n  - artifact: "
+                f"{step.artifact_type or 'unknown'} "
+                f"`{step.artifact_id or 'None'}`"
+            )
+            if step.artifact_path:
+                artifact += f"\n  - path: `{step.artifact_path}`"
+
+        steps.append(
+            f"{i}. **{step.name}** — `{step.status.value}`"
+            f"{f' — {step.message}' if step.message else ''}"
+            f"{f' ({step.timestamp})' if step.timestamp else ''}"
+            f"{artifact}"
+        )
+
+    steps_md = "\n".join(steps) or "- None"
+
+    return f"""# Run {trace.run_id}
+
+## Mode
+{_safe_enum_value(trace.mode)}
+
+## Final Status
+{trace.final_status}
+
+## Stop Reason
+{trace.stop_reason or "None"}
+
+## Request
+{trace.request or "None"}
+
+## Project
+{trace.project_key or "None"}
+
+## Root Ticket ID
+{trace.root_ticket_id or "None"}
+
+## Ticket ID
+{trace.ticket_id or "None"}
+
+## Output ID
+{trace.output_id or "None"}
+
+## Started At
+{trace.started_at or "None"}
+
+## Finished At
+{trace.finished_at or "None"}
+
+## Steps
+{steps_md}
+"""
+
+
+def save_run_trace(trace: RunTrace) -> tuple[Path, Path]:
+    """Save a run trace as both JSON and Markdown under runs/.
+
+    Files are named:
+
+        <timestamp>-<run_id>.json
+        <timestamp>-<run_id>.md
+
+    Returns:
+        (json_path, md_path)
+    """
+    ensure_run_dirs()
+
+    base = f"{timestamp_now()}-{trace.run_id}"
+
+    json_path = RUNS_DIR / f"{base}.json"
+    md_path = RUNS_DIR / f"{base}.md"
+
+    json_path.write_text(
+        trace.model_dump_json(indent=2),
+        encoding="utf-8",
+    )
+
+    md_path.write_text(
+        run_trace_to_markdown(trace),
+        encoding="utf-8",
+    )
+
+    return json_path, md_path
+
+
+def list_run_trace_files() -> List[Path]:
+    """List saved run trace JSON files, newest-first."""
+    ensure_run_dirs()
+    return sorted(RUNS_DIR.glob("*.json"), reverse=True)
+
+
+def load_run_trace_json(path: Path) -> RunTrace:
+    """Load a RunTrace from a JSON file."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return RunTrace.model_validate(data)
+
+
+# ---------------------------------------------------------------------------
+# Final deliverables
+# ---------------------------------------------------------------------------
+
+
+def save_deliverable(deliverable: Deliverable) -> tuple[Path, Path]:
+    """Write an accepted deliverable to disk as a real, usable file.
+
+    Produces two files under deliverables/:
+      - the artifact itself, using the deliverable's (sanitized) filename, e.g.
+        20260610-143000-deliv_xxx-README.md  (content written verbatim)
+      - a sidecar JSON record for tracking and lineage.
+
+    Returns:
+        (artifact_path, record_json_path)
+    """
+    ensure_deliverable_dirs()
+
+    filename = safe_filename(deliverable.filename or "deliverable.md")
+    base = f"{timestamp_now()}-{deliverable.deliverable_id}"
+
+    artifact_path = DELIVERABLES_DIR / f"{base}-{filename}"
+    record_path = DELIVERABLES_DIR / f"{base}.record.json"
+
+    # The artifact is the exact content, ready to use — no wrapper, no metadata.
+    artifact_path.write_text(deliverable.content, encoding="utf-8")
+
+    record_path.write_text(
+        deliverable.model_dump_json(indent=2),
+        encoding="utf-8",
+    )
+
+    return artifact_path, record_path
+
+
+def list_deliverable_record_files() -> List[Path]:
+    """List saved deliverable record JSON files, newest-first."""
+    ensure_deliverable_dirs()
+    return sorted(DELIVERABLES_DIR.glob("*.record.json"), reverse=True)
+
+
+def load_deliverable_record(path: Path) -> Deliverable:
+    """Load a Deliverable record from its sidecar JSON file."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return Deliverable.model_validate(data)
+
+
+def deliverable_from_output(
+    output: SpecialistOutput,
+    *,
+    filename: Optional[str] = None,
+    note: str = "",
+    root_ticket_id: Optional[str] = None,
+) -> Deliverable:
+    """Build a Deliverable from an accepted specialist output.
+
+    The deliverable content is the output's `deliverable` field — the actual
+    artifact. Filename comes from the explicit override, then the output's
+    suggested filename, then a slug of the title.
+    """
+    resolved_filename = (
+        filename
+        or _safe_attr(output, "deliverable_filename", None)
+        or f"{slugify(output.title)}.md"
+    )
+
+    return Deliverable(
+        title=output.title,
+        filename=safe_filename(resolved_filename),
+        content=output.deliverable,
+        format=_safe_attr(output, "deliverable_format", None),
+        source_output_id=output.output_id,
+        source_ticket_id=output.source_ticket_id,
+        root_ticket_id=root_ticket_id,
+        accepted_at=iso_now(),
+        note=note,
     )

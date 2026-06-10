@@ -57,6 +57,12 @@ outputs/**/*.md
 handoffs/**/*.json
 handoffs/**/*.md
 
+runs/*.json
+runs/*.md
+
+deliverables/*
+!deliverables/.gitkeep
+
 
 # Keep folder structure
 !tickets/open/.gitkeep
@@ -68,6 +74,7 @@ handoffs/**/*.md
 !tickets/rejected/.gitkeep
 !outputs/.gitkeep
 !handoffs/**/.gitkeep
+!runs/.gitkeep
 
 # ---------------------------------------------------------------------------
 # OS / editor

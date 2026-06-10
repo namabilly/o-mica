@@ -4,6 +4,7 @@ import streamlit as st
 
 from schemas import SpecialistType
 from ui.common import init_session_state, render_sidebar
+from ui.run_tab import render_run_tab
 from ui.create_tab import render_create_tab
 from ui.review_tab import render_review_tab
 from ui.dispatch_tab import render_dispatch_tab
@@ -25,10 +26,10 @@ FOLDERS = [
 
 IMPLEMENTED_SPECIALISTS = [
     SpecialistType.planner,
+    SpecialistType.writer,
     # Add these later after you create their prompt files:
     # SpecialistType.researcher,
     # SpecialistType.analyst,
-    # SpecialistType.writer,
     # SpecialistType.engineer,
     # SpecialistType.reviewer,
     # SpecialistType.operator,
@@ -47,8 +48,17 @@ st.caption(
 
 project_key, model = render_sidebar()
 
-tab_create, tab_review, tab_dispatch, tab_specialist, tab_output_review, tab_graph = st.tabs(
+(
+    tab_run,
+    tab_create,
+    tab_review,
+    tab_dispatch,
+    tab_specialist,
+    tab_output_review,
+    tab_graph,
+) = st.tabs(
     [
+        "Run / 执行",
         "New Edict / 下旨",
         "Review Desk / 批奏折",
         "Dispatch / 派遣",
@@ -57,6 +67,14 @@ tab_create, tab_review, tab_dispatch, tab_specialist, tab_output_review, tab_gra
         "Task Graph / 谱系",
     ]
 )
+
+
+with tab_run:
+    render_run_tab(
+        project_key=project_key,
+        model=model,
+        implemented_specialists=IMPLEMENTED_SPECIALISTS,
+    )
 
 
 with tab_create:

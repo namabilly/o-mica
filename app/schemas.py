@@ -24,6 +24,14 @@ def new_handoff_id() -> str:
     return f"handoff_{uuid4().hex[:12]}"
 
 
+def new_run_id() -> str:
+    return f"run_{uuid4().hex[:12]}"
+
+
+def new_deliverable_id() -> str:
+    return f"deliv_{uuid4().hex[:12]}"
+
+
 # ---------------------------------------------------------------------------
 # Core enums
 # ---------------------------------------------------------------------------
@@ -76,6 +84,12 @@ class TicketStatus(str, Enum):
     delegated = "delegated"
     completed = "completed"
     archived = "archived"
+
+
+class WorkflowMode(str, Enum):
+    manual = "manual"
+    guided = "guided"
+    auto = "auto"
 
 
 class ReviewDecision(str, Enum):
@@ -243,6 +257,17 @@ class SpecialistOutput(BaseModel):
 
     summary: str
     deliverable: str
+
+    # How to materialize the deliverable as a real file when accepted.
+    deliverable_filename: Optional[str] = Field(
+        default=None,
+        description="Suggested filename for the deliverable, e.g. README.md, proposal.md, prompt.txt.",
+    )
+    deliverable_format: Optional[str] = Field(
+        default=None,
+        description="Short format hint for the deliverable, e.g. markdown, text, json.",
+    )
+
     assumptions: List[str] = Field(default_factory=list)
     risks: List[str] = Field(default_factory=list)
     next_steps: List[str] = Field(default_factory=list)
@@ -291,3 +316,101 @@ class TicketContextBundle(BaseModel):
     root_ticket: Optional[TicketEnvelope] = None
     source_output: Optional[SpecialistOutput] = None
     child_tickets: List[TicketEnvelope] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Run traces (v0.9 — workflow modes)
+# ---------------------------------------------------------------------------
+
+
+class RunStepStatus(str, Enum):
+    pending = "pending"
+    running = "running"
+    succeeded = "succeeded"
+    failed = "failed"
+    skipped = "skipped"
+    waiting_for_review = "waiting_for_review"
+
+
+class RunStep(BaseModel):
+    """A single step in a workflow run.
+
+    Each step usually corresponds to one orchestration action, such as creating
+    a ticket, saving a handoff, or running a specialist. When a step produces a
+    persisted artifact, the artifact_* fields point back to it.
+    """
+
+    name: str
+    status: RunStepStatus
+    message: str = ""
+    artifact_type: Optional[str] = Field(
+        default=None,
+        description="Kind of artifact produced, e.g. ticket, handoff, output, followup_batch.",
+    )
+    artifact_id: Optional[str] = None
+    artifact_path: Optional[str] = None
+    timestamp: Optional[str] = None
+
+
+class RunTrace(BaseModel):
+    """A record of one workflow run across one or more steps.
+
+    Mode belongs to the run, not the ticket: the same ticket may be processed
+    manually today and in guided mode another time.
+    """
+
+    run_id: str = Field(default_factory=new_run_id)
+    mode: WorkflowMode
+
+    # What the run was about.
+    request: str = ""
+    project_key: str = ""
+
+    # Lineage into the task graph.
+    root_ticket_id: Optional[str] = None
+    ticket_id: Optional[str] = None
+    output_id: Optional[str] = None
+
+    # running | stopped_for_review | completed | failed
+    final_status: str = "running"
+    stop_reason: str = Field(
+        default="",
+        description="Why the run stopped, e.g. what Billy needs to do next.",
+    )
+
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+
+    steps: List[RunStep] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Final deliverables (v0.10)
+# ---------------------------------------------------------------------------
+
+
+class Deliverable(BaseModel):
+    """An accepted, final, user-facing artifact extracted from a specialist output.
+
+    While outputs/ holds specialist artifacts (some intermediate), a Deliverable
+    is the thing Billy accepted as done. Its `content` is written verbatim to a
+    real file under deliverables/ with the right extension.
+    """
+
+    deliverable_id: str = Field(default_factory=new_deliverable_id)
+
+    title: str
+    filename: str = Field(description="Final filename, e.g. README.md.")
+    content: str = Field(description="The exact file content to write to disk.")
+    format: Optional[str] = Field(
+        default=None,
+        description="Format hint, e.g. markdown, text, json.",
+    )
+
+    # Lineage back into the task graph.
+    source_output_id: Optional[str] = None
+    source_ticket_id: Optional[str] = None
+    root_ticket_id: Optional[str] = None
+
+    accepted_at: Optional[str] = None
+    note: str = ""

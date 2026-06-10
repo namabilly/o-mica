@@ -79,6 +79,7 @@ def init_session_state() -> None:
         "last_selected_ticket": None,
         "last_selected_output": None,
         "last_selected_graph_ticket": None,
+        "last_run_result": None,
     }
 
     for key, value in defaults.items():
@@ -106,7 +107,10 @@ def render_sidebar() -> tuple[str, str]:
         st.markdown("### Workflow")
         st.markdown(
             """
-            **New Edict**  
+            **Run**
+            One-shot: request → mode (manual/guided/auto) → candidate + trace.
+
+            **New Edict**
             Turn messy intent into a ticket.
 
             **Review Desk**  
@@ -375,6 +379,110 @@ def render_specialist_output(output: SpecialistOutput, key_prefix: str = "") -> 
         height=480,
         key=f"specialist_output_markdown_{key_prefix}{output.output_id}",
     )
+
+
+def _guess_filename(output) -> str:
+    """Best-effort default filename for accepting an output as a deliverable."""
+    suggested = getattr(output, "deliverable_filename", None)
+    if suggested:
+        return suggested
+
+    # Fall back to a slug of the title with a .md extension.
+    title = (output.title or "deliverable").lower().strip()
+    slug = "".join(c if c.isalnum() else "-" for c in title).strip("-") or "deliverable"
+    return f"{slug}.md"
+
+
+def render_accept_deliverable(output, *, key_prefix: str = "") -> None:
+    """Render the 'accept as final deliverable' control for a specialist output.
+
+    Lets Billy confirm/edit the filename, saves the deliverable's content to a
+    real file under deliverables/, and offers an immediate download.
+    """
+    from workflows import accept_output_as_deliverable
+
+    st.markdown("### Accept as Final Deliverable")
+    st.caption(
+        "Save the deliverable to a real file under `deliverables/` and download it."
+    )
+
+    filename = st.text_input(
+        "Filename",
+        value=_guess_filename(output),
+        key=f"{key_prefix}deliverable_filename_{output.output_id}",
+    )
+
+    note = st.text_input(
+        "Acceptance note (optional)",
+        value="",
+        key=f"{key_prefix}deliverable_note_{output.output_id}",
+    )
+
+    # Always offer the raw content for download, even before saving.
+    st.download_button(
+        "Download deliverable",
+        data=output.deliverable,
+        file_name=filename or _guess_filename(output),
+        mime="text/plain",
+        use_container_width=True,
+        key=f"{key_prefix}deliverable_download_{output.output_id}",
+    )
+
+    if st.button(
+        "Accept and save deliverable",
+        type="primary",
+        use_container_width=True,
+        key=f"{key_prefix}deliverable_accept_{output.output_id}",
+    ):
+        deliverable, artifact_path = accept_output_as_deliverable(
+            output=output,
+            filename=filename or None,
+            note=note,
+        )
+        st.success(f"Saved final deliverable to: `{artifact_path}`")
+
+
+_RUN_STEP_ICONS = {
+    "succeeded": "✅",
+    "failed": "❌",
+    "running": "⏳",
+    "pending": "⬜",
+    "skipped": "⏭️",
+    "waiting_for_review": "🟡",
+}
+
+
+def render_run_trace(trace, *, expanded: bool = True) -> None:
+    """Render a RunTrace: header metrics plus a step-by-step timeline."""
+    st.markdown("### Trace / 执行轨迹")
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Mode", safe_enum_value(trace.mode))
+    c2.metric("Final Status", trace.final_status)
+    c3.metric("Steps", len(trace.steps))
+
+    if trace.stop_reason:
+        st.info(trace.stop_reason)
+
+    with st.expander("Steps", expanded=expanded):
+        for i, step in enumerate(trace.steps, start=1):
+            icon = _RUN_STEP_ICONS.get(safe_enum_value(step.status), "•")
+            line = f"{icon} **{i}. {step.name}** — `{safe_enum_value(step.status)}`"
+            if step.message:
+                line += f" — {step.message}"
+            st.markdown(line)
+
+            if step.artifact_id or step.artifact_path:
+                detail = f"`{step.artifact_type or 'artifact'}: {step.artifact_id or 'None'}`"
+                st.caption(detail)
+                if step.artifact_path:
+                    st.caption(f"File: `{step.artifact_path}`")
+
+    with st.expander("Lineage", expanded=False):
+        st.write(f"**Run ID:** `{trace.run_id}`")
+        st.write(f"**Root Ticket ID:** `{trace.root_ticket_id or 'None'}`")
+        st.write(f"**Ticket ID:** `{trace.ticket_id or 'None'}`")
+        st.write(f"**Output ID:** `{trace.output_id or 'None'}`")
 
 
 def render_followup_batch(batch: FollowupTicketBatch) -> list[int]:
