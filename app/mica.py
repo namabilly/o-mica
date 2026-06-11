@@ -17,6 +17,7 @@ from schemas import (
     SpecialistOutput,
     TicketEnvelope,
     TicketStatus,
+    now_iso,
 )
 
 
@@ -123,6 +124,8 @@ Create a structured ticket. Do not execute the task.
     parsed.ticket.parent_ticket_id = None
     parsed.ticket.source_output_id = None
     parsed.ticket.status = TicketStatus.drafted
+    # Stamp creation time in code, not from the model.
+    parsed.ticket.created_at = now_iso()
 
     return parsed
 
@@ -179,6 +182,8 @@ Important:
     parsed.ticket.source_output_id = original_ticket.source_output_id
     parsed.ticket.child_ticket_ids = original_ticket.child_ticket_ids
     parsed.ticket.review_history = original_ticket.review_history
+    # A revision keeps the original creation time.
+    parsed.ticket.created_at = original_ticket.created_at
 
     return parsed
 
@@ -297,5 +302,6 @@ Create a small batch of follow-up tickets.
         envelope.ticket.source_output_id = output.output_id
         envelope.ticket.status = TicketStatus.drafted
         envelope.ticket.child_ticket_ids = []
+        envelope.ticket.created_at = now_iso()
 
     return parsed

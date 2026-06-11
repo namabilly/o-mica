@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from enum import Enum
 from typing import List, Optional
 from uuid import uuid4
@@ -8,8 +9,13 @@ from pydantic import BaseModel, Field
 
 
 # ---------------------------------------------------------------------------
-# ID helpers
+# ID / time helpers
 # ---------------------------------------------------------------------------
+
+
+def now_iso() -> str:
+    """Current local time as an ISO-8601 string (seconds precision)."""
+    return datetime.now().isoformat(timespec="seconds")
 
 
 def new_ticket_id() -> str:
@@ -136,6 +142,13 @@ class TaskTicket(BaseModel):
     # Stable identity
     ticket_id: str = Field(default_factory=new_ticket_id)
 
+    # When this ticket was first created (ISO-8601, local time). Set explicitly
+    # in code at creation time (mica.create_ticket etc.). Defaults to None so
+    # tickets saved before this field existed stay None and callers fall back to
+    # the filename timestamp — a now_iso default would wrongly stamp "now" on
+    # every load of an old ticket.
+    created_at: Optional[str] = None
+
     # Task graph lineage
     parent_ticket_id: Optional[str] = Field(
         default=None,
@@ -246,6 +259,11 @@ class HandoffPacket(BaseModel):
 
 class SpecialistOutput(BaseModel):
     output_id: str = Field(default_factory=new_output_id)
+
+    # When this output was produced (ISO-8601, local time). Set explicitly in
+    # code (specialists.run_specialist). Defaults to None so outputs saved
+    # before this field existed fall back to the filename timestamp.
+    created_at: Optional[str] = None
 
     # Source linkage
     source_ticket_id: Optional[str] = None

@@ -6,7 +6,7 @@ from typing import Optional
 
 from openai import OpenAI
 
-from schemas import SpecialistOutput, SpecialistType
+from schemas import SpecialistOutput, SpecialistType, now_iso
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -163,5 +163,6 @@ Create the specialist deliverable.
     parsed.specialist_type = specialist_type
     parsed.source_ticket_id = resolved_source_ticket_id
     parsed.source_handoff_id = resolved_source_handoff_id
+    parsed.created_at = now_iso()
 
     return parsed

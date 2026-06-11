@@ -1,4 +1,4 @@
-<div class="board" hx-get="/tasks/board" hx-trigger="ticketChanged from:body" hx-swap="outerHTML">
+<div class="board" id="board">
   {% for col in columns %}
     <div class="col">
       <h4><span class="dot {{ col.dot }}" style="position:static"></span> {{ col.label }}
@@ -9,6 +9,7 @@
           <div>
             <span class="chip">{{ c.specialist }}/{{ c.domain }}</span>
             {% if c.priority %}<span class="chip">{{ c.priority }}</span>{% endif %}
+            {% if c.rel %}<span class="chip" title="{{ c.exact }}">🕒 {{ c.rel }}</span>{% endif %}
           </div>
         </div>
       {% endfor %}

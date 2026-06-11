@@ -6,5 +6,32 @@
           hx-get="/tasks/new" hx-target="#modal" hx-swap="innerHTML">＋ New ticket</button>
 </div>
 
-{% include "_task_board.html" %}
+<form class="card filterbar" style="margin-top:12px;padding:12px 14px"
+      hx-get="/tasks/board" hx-target="#board-wrap" hx-swap="innerHTML"
+      hx-trigger="change, search, keyup delay:300ms from:input[name=q], ticketChanged from:body">
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+    <input type="search" name="q" placeholder="🔍 search title / objective"
+           style="flex:1;min-width:180px;border:1.5px solid var(--line);border-radius:12px;padding:8px 12px;background:var(--bg-soft)">
+    <select name="specialist" class="fsel">
+      <option value="all">specialist: all</option>
+      {% for s in specialists %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+    </select>
+    <select name="domain" class="fsel">
+      <option value="all">domain: all</option>
+      {% for d in domains %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
+    </select>
+    <select name="priority" class="fsel">
+      <option value="all">priority: all</option>
+      {% for p in priorities %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+    </select>
+    <select name="sort" class="fsel">
+      <option value="new">newest first</option>
+      <option value="old">oldest first</option>
+    </select>
+  </div>
+</form>
+
+<div id="board-wrap">
+  {% include "_task_board.html" %}
+</div>
 {% endblock %}

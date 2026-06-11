@@ -26,7 +26,14 @@ from fastapi.templating import Jinja2Templates
 from sse_starlette.sse import EventSourceResponse
 
 from run_manager import get_run, start_continue, start_run
-from schemas import ReviewDecision, SpecialistType, TicketStatus, WorkflowMode
+from schemas import (
+    DomainType,
+    Priority,
+    ReviewDecision,
+    SpecialistType,
+    TicketStatus,
+    WorkflowMode,
+)
 from storage import (
     add_review_record,
     find_ticket_path_by_id,
@@ -47,6 +54,11 @@ from web.runs import sse_trace, steps_view
 
 # Specialists offered as routing hints in the Run form.
 SPECIALISTS = ["planner", "writer", "researcher", "reviewer"]
+
+# Full enum lists for filter dropdowns.
+ALL_SPECIALISTS = [s.value for s in SpecialistType]
+ALL_DOMAINS = [d.value for d in DomainType]
+ALL_PRIORITIES = [p.value for p in Priority]
 
 # Map a finished run's final_status to a pill class for templates.
 def _status_pill(status: str) -> str:
@@ -336,7 +348,12 @@ def run_continue(request: Request, run_id: str):
 @app.get("/tasks", response_class=HTMLResponse)
 def tasks_page(request: Request):
     ctx = base_ctx(request, "tasks")
-    ctx["columns"] = tasks_view.board()
+    ctx.update(
+        columns=tasks_view.board(),
+        specialists=ALL_SPECIALISTS,
+        domains=ALL_DOMAINS,
+        priorities=ALL_PRIORITIES,
+    )
     return TEMPLATES.TemplateResponse(request, "tasks.html", ctx)
 
 
@@ -361,9 +378,18 @@ def tasks_new(request: Request):
 
 
 @app.get("/tasks/board", response_class=HTMLResponse)
-def tasks_board(request: Request):
+def tasks_board(
+    request: Request,
+    q: str = "",
+    specialist: str = "all",
+    domain: str = "all",
+    priority: str = "all",
+    sort: str = "new",
+):
     ctx = base_ctx(request, "tasks")
-    ctx["columns"] = tasks_view.board()
+    ctx["columns"] = tasks_view.board(
+        q=q, specialist=specialist, domain=domain, priority=priority, sort=sort
+    )
     return TEMPLATES.TemplateResponse(request, "_task_board.html", ctx)
 
 
@@ -479,8 +505,27 @@ def library_page(request: Request):
         outputs=library_view.outputs(),
         handoffs=library_view.handoffs(),
         deliverables=library_view.deliverables(),
+        specialists=ALL_SPECIALISTS,
+        domains=ALL_DOMAINS,
     )
     return TEMPLATES.TemplateResponse(request, "library.html", ctx)
+
+
+@app.get("/library/lists", response_class=HTMLResponse)
+def library_lists(
+    request: Request,
+    q: str = "",
+    specialist: str = "all",
+    domain: str = "all",
+    sort: str = "new",
+):
+    ctx = base_ctx(request, "library")
+    ctx.update(
+        outputs=library_view.outputs(q=q, specialist=specialist, domain=domain, sort=sort),
+        handoffs=library_view.handoffs(q=q, specialist=specialist, domain=domain, sort=sort),
+        deliverables=library_view.deliverables(q=q, sort=sort),
+    )
+    return TEMPLATES.TemplateResponse(request, "_library_lists.html", ctx)
 
 
 @app.get("/library/output/{output_id}", response_class=HTMLResponse)

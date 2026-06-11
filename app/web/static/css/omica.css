@@ -106,6 +106,10 @@ textarea,input[type=text],select{font-family:inherit;font-size:14px;color:var(--
 .deliv pre{background:var(--bg-soft);border-radius:12px;padding:14px;overflow:auto;
   font-size:13px;white-space:pre-wrap;font-family:ui-monospace,monospace}
 
+/* filter bar */
+.fsel{border:1.5px solid var(--line);border-radius:12px;padding:8px 10px;background:var(--bg-soft);
+  color:var(--text);font-weight:600;font-size:13px}
+
 /* kanban */
 .board{display:flex;gap:16px;margin-top:18px;align-items:flex-start}
 .col{flex:1;min-width:0;background:var(--bg-soft);border-radius:var(--radius);padding:12px}

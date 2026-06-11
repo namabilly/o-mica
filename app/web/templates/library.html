@@ -1,15 +1,14 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>📚 Library</h1>
-<p class="muted">Saved handoffs, specialist outputs, and accepted deliverables.</p>
+<p class="muted">Saved specialist outputs, handoffs, and accepted deliverables.</p>
 
 <style>
-  /* Radios are top-level siblings of the panes so the ~ combinator works. */
+  /* Radios precede #lib-wrap; panes live inside it. ~ reaches them. */
   .lib-pane{display:none}
-  #lib_out:checked   ~ .lib-panes .pane-out{display:block}
-  #lib_hand:checked  ~ .lib-panes .pane-hand{display:block}
-  #lib_deliv:checked ~ .lib-panes .pane-deliv{display:block}
-  /* active tab highlight (radios precede the label group) */
+  #lib_out:checked   ~ #lib-wrap .pane-out{display:block}
+  #lib_hand:checked  ~ #lib-wrap .pane-hand{display:block}
+  #lib_deliv:checked ~ #lib-wrap .pane-deliv{display:block}
   #lib_out:checked   ~ .lib-tabs label[for=lib_out],
   #lib_hand:checked  ~ .lib-tabs label[for=lib_hand],
   #lib_deliv:checked ~ .lib-tabs label[for=lib_deliv]{
@@ -21,40 +20,34 @@
 <input class="libtab-radio" type="radio" id="lib_hand" name="libtab">
 <input class="libtab-radio" type="radio" id="lib_deliv" name="libtab">
 
-<div class="seg lib-tabs" style="margin:14px 0">
-  <label for="lib_out">Outputs</label>
-  <label for="lib_hand">Handoffs</label>
-  <label for="lib_deliv">Deliverables</label>
+<div style="display:flex;align-items:center;gap:12px;margin:14px 0;flex-wrap:wrap">
+  <div class="seg lib-tabs">
+    <label for="lib_out">Outputs</label>
+    <label for="lib_hand">Handoffs</label>
+    <label for="lib_deliv">Deliverables</label>
+  </div>
+
+  <form style="display:flex;gap:8px;flex-wrap:wrap;margin-left:auto"
+        hx-get="/library/lists" hx-target="#lib-wrap" hx-swap="innerHTML"
+        hx-trigger="change, search, keyup delay:300ms from:input[name=q]">
+    <input type="search" name="q" placeholder="🔍 search"
+           style="border:1.5px solid var(--line);border-radius:12px;padding:7px 11px;background:var(--bg-soft);min-width:140px">
+    <select name="specialist" class="fsel">
+      <option value="all">specialist: all</option>
+      {% for s in specialists %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+    </select>
+    <select name="domain" class="fsel">
+      <option value="all">domain: all</option>
+      {% for d in domains %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
+    </select>
+    <select name="sort" class="fsel">
+      <option value="new">newest first</option>
+      <option value="old">oldest first</option>
+    </select>
+  </form>
 </div>
 
-<div class="lib-panes">
-  <!-- OUTPUTS -->
-  <div class="lib-pane pane-out">
-    {% for o in outputs %}
-      <div class="card" hx-get="/library/output/{{ o.id }}" hx-target="#modal" hx-swap="innerHTML" style="cursor:pointer">
-        <b>{{ o.title }}</b> <span class="chip">{{ o.specialist }}/{{ o.domain }}</span>
-        <div class="muted" style="font-size:13px">{{ o.summary }}</div>
-      </div>
-    {% else %}<p class="muted center">No outputs yet ✿</p>{% endfor %}
-  </div>
-
-  <!-- HANDOFFS -->
-  <div class="lib-pane pane-hand">
-    {% for h in handoffs %}
-      <div class="card" hx-get="/library/handoff/{{ h.id }}" hx-target="#modal" hx-swap="innerHTML" style="cursor:pointer">
-        <b>{{ h.title }}</b> <span class="chip">{{ h.specialist }}/{{ h.domain }}</span>
-      </div>
-    {% else %}<p class="muted center">No handoffs yet ✿</p>{% endfor %}
-  </div>
-
-  <!-- DELIVERABLES -->
-  <div class="lib-pane pane-deliv">
-    {% for d in deliverables %}
-      <div class="card">
-        <b>{{ d.title }}</b> <span class="pill pri">{{ d.filename }}</span>
-        <a class="btn sm ghost" style="float:right" href="/library/deliverable/{{ d.id }}/download">⬇ download</a>
-      </div>
-    {% else %}<p class="muted center">No deliverables yet ✿</p>{% endfor %}
-  </div>
+<div id="lib-wrap">
+  {% include "_library_lists.html" %}
 </div>
 {% endblock %}
