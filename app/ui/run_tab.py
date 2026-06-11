@@ -11,7 +11,8 @@ from storage import save_followup_ticket_batch, save_specialist_output
 from ui.common import (
     render_accept_deliverable,
     render_followup_batch,
-    render_run_trace,
+    render_run_steps_compact,
+    render_run_trace_interactive,
     render_specialist_output,
     render_ticket_summary,
 )
@@ -105,6 +106,12 @@ def render_run_tab(
     active_handle = get_run(st.session_state.get("active_run_id"))
     run_in_progress = active_handle is not None and active_handle.is_running
 
+    # While a run is in progress, no stale result/batch from a prior run should
+    # linger. Clear defensively here so it holds regardless of how the run began.
+    if run_in_progress:
+        st.session_state.last_run_result = None
+        st.session_state.last_followup_batch = None
+
     if st.button(
         "Run",
         type="primary",
@@ -157,7 +164,7 @@ def _render_active_run(*, model: str) -> None:
             "back — it won't stop."
         )
         with st.status("Working…", expanded=True):
-            render_run_trace(handle.trace, expanded=True)
+            render_run_steps_compact(handle.trace)
 
         # Auto-refresh to pick up new steps, but bound it so the rerun loop can
         # never run away. After the ceiling, fall back to a manual refresh.
@@ -248,7 +255,7 @@ def _render_result(result, *, model: str) -> None:
 
     # --- Trace / Artifacts -------------------------------------------------
     st.divider()
-    render_run_trace(result.trace, expanded=True)
+    render_run_trace_interactive(result.trace, expanded=True)
 
 
 def _render_optional_followups(result, *, model: str) -> None:

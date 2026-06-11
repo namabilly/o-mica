@@ -7,12 +7,16 @@ import streamlit as st
 
 from schemas import FollowupTicketBatch, HandoffPacket, SpecialistOutput, TicketEnvelope
 from storage import (
+    handoff_packet_to_markdown,
     list_handoff_packet_files,
     list_specialist_output_files,
     list_ticket_json_files,
+    load_handoff_packet_by_id,
     load_handoff_packet_json,
+    load_specialist_output_by_id,
     load_specialist_output_json,
     load_ticket,
+    load_ticket_by_id,
     specialist_output_to_markdown,
     ticket_to_markdown,
 )
@@ -196,7 +200,41 @@ def render_dashboard(folders: list[str]) -> None:
         col.metric(folder, len(list_ticket_json_files(folder)))
 
 
+def _consume_nav_preselect(nav_key: str, selectbox_key: str, labels: list[str]) -> None:
+    """If a nav request targets an artifact in `labels`, pre-select it.
+
+    Matches by the artifact ID appearing in a label (file stems embed the ID),
+    sets the selectbox's stored value, and clears the nav request. Safe to call
+    every render — it no-ops unless a matching nav request is pending.
+    """
+    artifact_id = st.session_state.get(nav_key)
+    if not artifact_id:
+        return
+    for label in labels:
+        if artifact_id in label:
+            st.session_state[selectbox_key] = label
+            st.session_state.pop(nav_key, None)
+            return
+
+
+def _folder_for_artifact_id(artifact_id: str, folders: list[str]) -> str | None:
+    """Find which ticket folder contains the given ticket ID, if any."""
+    for folder in folders:
+        for path in list_ticket_json_files(folder):
+            if artifact_id in path.stem:
+                return folder
+    return None
+
+
 def select_ticket_ui(prefix: str, folders: list[str]):
+    # If navigating to a specific ticket, switch to its folder first so the
+    # selectbox below can surface it.
+    nav_ticket_id = st.session_state.get("nav_select_ticket_id")
+    if nav_ticket_id:
+        target_folder = _folder_for_artifact_id(nav_ticket_id, folders)
+        if target_folder is not None:
+            st.session_state[f"{prefix}_folder_filter"] = target_folder
+
     folder_filter = st.selectbox(
         "Ticket folder",
         options=folders,
@@ -211,6 +249,8 @@ def select_ticket_ui(prefix: str, folders: list[str]):
         return None, None
 
     labels = [path.stem for path in ticket_files]
+
+    _consume_nav_preselect("nav_select_ticket_id", f"{prefix}_selected_ticket", labels)
 
     selected_label = st.selectbox(
         "Select ticket",
@@ -232,6 +272,9 @@ def select_ticket_ui(prefix: str, folders: list[str]):
 
 
 def select_handoff_packet_ui(prefix: str, implemented_specialists: list):
+    if st.session_state.get("nav_select_handoff_id"):
+        st.session_state[f"{prefix}_handoff_filter"] = "all"
+
     specialist_filter = st.selectbox(
         "Handoff folder",
         options=["all"] + [s.value for s in implemented_specialists],
@@ -257,6 +300,10 @@ def select_handoff_packet_ui(prefix: str, implemented_specialists: list):
 
     labels = [path.stem for path in json_files]
 
+    _consume_nav_preselect(
+        "nav_select_handoff_id", f"{prefix}_selected_handoff_packet", labels
+    )
+
     selected_label = st.selectbox(
         "Select saved handoff packet",
         options=labels,
@@ -270,6 +317,11 @@ def select_handoff_packet_ui(prefix: str, implemented_specialists: list):
     
 
 def select_specialist_output_ui(prefix: str, implemented_specialists: list):
+    # When navigating to a specific output, widen the filter to "all" so it is
+    # always reachable regardless of which specialist produced it.
+    if st.session_state.get("nav_select_output_id"):
+        st.session_state[f"{prefix}_specialist_output_filter"] = "all"
+
     specialist_filter = st.selectbox(
         "Specialist output folder",
         options=["all"] + [s.value for s in implemented_specialists],
@@ -293,6 +345,10 @@ def select_specialist_output_ui(prefix: str, implemented_specialists: list):
         return None, None
 
     labels = [path.stem for path in json_files]
+
+    _consume_nav_preselect(
+        "nav_select_output_id", f"{prefix}_selected_specialist_output", labels
+    )
 
     selected_label = st.selectbox(
         "Select specialist output",
@@ -440,6 +496,20 @@ _RUN_STEP_ICONS = {
 }
 
 
+def render_run_steps_compact(trace) -> None:
+    """Render the step list with no expanders (safe inside st.status).
+
+    Used for the live in-progress view, which is itself wrapped in st.status
+    (an expander) — Streamlit forbids nesting expanders.
+    """
+    for i, step in enumerate(trace.steps, start=1):
+        icon = _RUN_STEP_ICONS.get(safe_enum_value(step.status), "•")
+        line = f"{icon} **{i}. {step.name}** — `{safe_enum_value(step.status)}`"
+        if step.message:
+            line += f" — {step.message}"
+        st.markdown(line)
+
+
 def render_run_trace(trace, *, expanded: bool = True) -> None:
     """Render a RunTrace: header metrics plus a step-by-step timeline."""
     st.markdown("### Trace / 执行轨迹")
@@ -465,6 +535,130 @@ def render_run_trace(trace, *, expanded: bool = True) -> None:
                 st.caption(detail)
                 if step.artifact_path:
                     st.caption(f"File: `{step.artifact_path}`")
+
+    with st.expander("Lineage", expanded=False):
+        st.write(f"**Run ID:** `{trace.run_id}`")
+        st.write(f"**Root Ticket ID:** `{trace.root_ticket_id or 'None'}`")
+        st.write(f"**Ticket ID:** `{trace.ticket_id or 'None'}`")
+        st.write(f"**Output ID:** `{trace.output_id or 'None'}`")
+
+
+# ---------------------------------------------------------------------------
+# Cross-view navigation (Run trace → Advanced tabs)
+# ---------------------------------------------------------------------------
+
+# Which Advanced tab handles each artifact type, and the session key it reads to
+# pre-select the artifact.
+ARTIFACT_NAV = {
+    "ticket": {"tab": "Review Desk / 批奏折", "select_key": "nav_select_ticket_id"},
+    "handoff": {"tab": "Specialist Desk / 六部", "select_key": "nav_select_handoff_id"},
+    "output": {"tab": "Output Review / 验收", "select_key": "nav_select_output_id"},
+}
+
+
+def request_nav(artifact_type: str, artifact_id: str) -> None:
+    """Record a request to jump to the Advanced tab that handles this artifact.
+
+    main.py reads `nav_view`/`nav_tab` to switch view + tab; the target tab reads
+    its `select_key` to pre-select the artifact.
+    """
+    nav = ARTIFACT_NAV.get(artifact_type)
+    if nav is None:
+        return
+    st.session_state.nav_view = "Advanced / 工房"
+    st.session_state.nav_tab = nav["tab"]
+    st.session_state[nav["select_key"]] = artifact_id
+
+
+def _render_step_artifact_detail(step) -> None:
+    """Load and render a FLAT inline detail for a trace step's artifact.
+
+    Must not use expanders: this renders inside a step expander, and Streamlit
+    forbids nesting expanders. So we show the key fields directly.
+    """
+    atype = step.artifact_type
+    aid = step.artifact_id
+
+    if atype == "ticket":
+        env = load_ticket_by_id(aid)
+        if env is None:
+            st.caption("Ticket not found on disk.")
+            return
+        t = env.ticket
+        st.markdown(f"**{t.title}**")
+        st.caption(_badge_line(t, show_status=True))
+        st.markdown("**Objective**")
+        st.write(t.objective)
+        st.markdown("**Next action**")
+        st.write(t.next_action)
+    elif atype == "handoff":
+        packet = load_handoff_packet_by_id(aid)
+        if packet is None:
+            st.caption("Handoff not found on disk.")
+            return
+        st.markdown(f"**{packet.title}**")
+        st.caption(
+            f"{safe_enum_value(packet.specialist_type)}/{safe_enum_value(packet.domain_type)}"
+        )
+        st.code(handoff_packet_to_markdown(packet), language="markdown")
+    elif atype == "output":
+        out = load_specialist_output_by_id(aid)
+        if out is None:
+            st.caption("Output not found on disk.")
+            return
+        st.markdown(f"**{out.title}**")
+        if getattr(out, "deliverable_filename", None):
+            st.caption(f"`{out.deliverable_filename}`")
+        if out.summary:
+            st.caption(out.summary)
+        st.markdown(out.deliverable)
+    else:
+        st.caption("No inline detail available for this step.")
+
+
+def render_run_trace_interactive(trace, *, expanded: bool = True) -> None:
+    """Run trace with clickable steps: expand inline for detail + actions.
+
+    Each step that produced an artifact can be expanded to inspect it, with an
+    "Open in Advanced" button that navigates to the full control panel. This is
+    the precursor to the future graph view (nodes you expand to act on).
+    """
+    st.markdown("### Trace / 执行轨迹")
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Mode", safe_enum_value(trace.mode))
+    c2.metric("Final Status", trace.final_status)
+    c3.metric("Steps", len(trace.steps))
+
+    if trace.stop_reason:
+        st.info(trace.stop_reason)
+
+    for i, step in enumerate(trace.steps, start=1):
+        icon = _RUN_STEP_ICONS.get(safe_enum_value(step.status), "•")
+        header = f"{icon} {i}. {step.name} — {safe_enum_value(step.status)}"
+        if step.message:
+            header += f" · {step.message}"
+
+        has_artifact = bool(step.artifact_id) and step.artifact_type in ARTIFACT_NAV
+
+        if not has_artifact:
+            # Non-artifact steps (awaits, gates) are shown as plain lines.
+            st.markdown(header)
+            continue
+
+        with st.expander(header, expanded=False):
+            st.caption(f"`{step.artifact_type}: {step.artifact_id}`")
+            if step.artifact_path:
+                st.caption(f"File: `{step.artifact_path}`")
+
+            _render_step_artifact_detail(step)
+
+            if st.button(
+                "Open in Advanced →",
+                key=f"nav_{trace.run_id}_{i}_{step.artifact_id}",
+            ):
+                request_nav(step.artifact_type, step.artifact_id)
+                st.rerun()
 
     with st.expander("Lineage", expanded=False):
         st.write(f"**Run ID:** `{trace.run_id}`")

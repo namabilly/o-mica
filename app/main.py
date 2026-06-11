@@ -41,6 +41,12 @@ st.set_page_config(page_title="O-Mica", page_icon="🏛️", layout="wide")
 
 init_session_state()
 
+# Honor a navigation request from a Run-trace step (set before the sidebar radio
+# is created so it picks up the forced view).
+_nav_view = st.session_state.pop("nav_view", None)
+if _nav_view is not None:
+    st.session_state["app_view"] = _nav_view
+
 st.title("🏛️ O-Mica")
 
 project_key, model, view = render_sidebar()
@@ -54,6 +60,12 @@ if view == "Run / 执行":
         implemented_specialists=IMPLEMENTED_SPECIALISTS,
     )
 else:
+    # If we arrived here via a Run-trace "Open in Advanced" jump, point the user
+    # at the right tab (Streamlit 1.32 can't programmatically focus a tab).
+    _nav_tab = st.session_state.pop("nav_tab", None)
+    if _nav_tab is not None:
+        st.success(f"Opened **{_nav_tab}** — the artifact is pre-selected there.")
+
     (
         tab_create,
         tab_review,
