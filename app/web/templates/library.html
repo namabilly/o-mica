@@ -3,18 +3,29 @@
 <h1>📚 Library</h1>
 <p class="muted">Saved handoffs, specialist outputs, and accepted deliverables.</p>
 
-<div class="seg" style="margin:14px 0">
-  <input type="radio" id="lib_out" name="libtab" checked><label for="lib_out">Outputs</label>
-  <input type="radio" id="lib_hand" name="libtab"><label for="lib_hand">Handoffs</label>
-  <input type="radio" id="lib_deliv" name="libtab"><label for="lib_deliv">Deliverables</label>
-</div>
-
 <style>
+  /* Radios are top-level siblings of the panes so the ~ combinator works. */
   .lib-pane{display:none}
   #lib_out:checked   ~ .lib-panes .pane-out{display:block}
   #lib_hand:checked  ~ .lib-panes .pane-hand{display:block}
   #lib_deliv:checked ~ .lib-panes .pane-deliv{display:block}
+  /* active tab highlight (radios precede the label group) */
+  #lib_out:checked   ~ .lib-tabs label[for=lib_out],
+  #lib_hand:checked  ~ .lib-tabs label[for=lib_hand],
+  #lib_deliv:checked ~ .lib-tabs label[for=lib_deliv]{
+    background:#fff;color:var(--primary-d);box-shadow:var(--shadow-sm);
+  }
 </style>
+
+<input class="libtab-radio" type="radio" id="lib_out" name="libtab" checked>
+<input class="libtab-radio" type="radio" id="lib_hand" name="libtab">
+<input class="libtab-radio" type="radio" id="lib_deliv" name="libtab">
+
+<div class="seg lib-tabs" style="margin:14px 0">
+  <label for="lib_out">Outputs</label>
+  <label for="lib_hand">Handoffs</label>
+  <label for="lib_deliv">Deliverables</label>
+</div>
 
 <div class="lib-panes">
   <!-- OUTPUTS -->

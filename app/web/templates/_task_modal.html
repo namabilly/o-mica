@@ -5,18 +5,29 @@
   <h2>{{ t.title }}</h2>
   <div class="muted" style="font-size:13px">{{ t.specialist }}/{{ t.domain }} · {{ t.priority }} priority · {{ t.id }}</div>
 
-  <div class="seg" style="margin:14px 0">
-    <input type="radio" id="tab_review" name="mtab" checked><label for="tab_review">Review</label>
-    <input type="radio" id="tab_dispatch" name="mtab"><label for="tab_dispatch">Dispatch</label>
-    <input type="radio" id="tab_inspect" name="mtab"><label for="tab_inspect">Inspect</label>
-  </div>
-
   <style>
+    /* Radios are siblings of .panes so the ~ combinator can reach the panes. */
     #modal .pane{display:none}
-    #modal #tab_review:checked  ~ .panes .p-review{display:block}
+    #modal #tab_review:checked   ~ .panes .p-review{display:block}
     #modal #tab_dispatch:checked ~ .panes .p-dispatch{display:block}
     #modal #tab_inspect:checked  ~ .panes .p-inspect{display:block}
+    #modal .mtabs input{display:none}
+    #modal #tab_review:checked   ~ .mtabs label[for=tab_review],
+    #modal #tab_dispatch:checked ~ .mtabs label[for=tab_dispatch],
+    #modal #tab_inspect:checked  ~ .mtabs label[for=tab_inspect]{
+      background:#fff;color:var(--primary-d);box-shadow:var(--shadow-sm);
+    }
   </style>
+
+  <input type="radio" id="tab_review" name="mtab" checked>
+  <input type="radio" id="tab_dispatch" name="mtab">
+  <input type="radio" id="tab_inspect" name="mtab">
+
+  <div class="seg mtabs" style="margin:14px 0">
+    <label for="tab_review">Review</label>
+    <label for="tab_dispatch">Dispatch</label>
+    <label for="tab_inspect">Inspect</label>
+  </div>
 
   <div class="panes">
     <!-- REVIEW -->
