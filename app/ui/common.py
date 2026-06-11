@@ -570,15 +570,12 @@ def request_nav(artifact_type: str, artifact_id: str) -> None:
     st.session_state[nav["select_key"]] = artifact_id
 
 
-def _render_step_artifact_detail(step) -> None:
-    """Load and render a FLAT inline detail for a trace step's artifact.
+def _render_step_artifact_detail_by(atype: str, aid: str) -> None:
+    """Load and render a FLAT inline detail for an artifact by type + id.
 
-    Must not use expanders: this renders inside a step expander, and Streamlit
-    forbids nesting expanders. So we show the key fields directly.
+    Must not use expanders: callers render this inside an expander or panel, and
+    Streamlit forbids nesting expanders. So we show the key fields directly.
     """
-    atype = step.artifact_type
-    aid = step.artifact_id
-
     if atype == "ticket":
         env = load_ticket_by_id(aid)
         if env is None:
@@ -614,6 +611,11 @@ def _render_step_artifact_detail(step) -> None:
         st.markdown(out.deliverable)
     else:
         st.caption("No inline detail available for this step.")
+
+
+def _render_step_artifact_detail(step) -> None:
+    """Flat inline detail for a trace step's artifact (delegates by type + id)."""
+    _render_step_artifact_detail_by(step.artifact_type, step.artifact_id)
 
 
 def render_run_trace_interactive(trace, *, expanded: bool = True) -> None:

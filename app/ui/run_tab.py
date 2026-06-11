@@ -16,6 +16,7 @@ from ui.common import (
     render_specialist_output,
     render_ticket_summary,
 )
+from ui.graph_trace import render_graph_trace
 from workflows import (
     allowed_modes_for,
     can_continue,
@@ -255,7 +256,23 @@ def _render_result(result, *, model: str) -> None:
 
     # --- Trace / Artifacts -------------------------------------------------
     st.divider()
-    render_run_trace_interactive(result.trace, expanded=True)
+
+    trace_view = st.radio(
+        "Trace view",
+        options=["Steps", "Graph"],
+        index=0,
+        horizontal=True,
+        key="run_trace_view",
+    )
+
+    if trace_view == "Graph":
+        root_id = result.trace.root_ticket_id or result.trace.ticket_id
+        if root_id:
+            render_graph_trace(root_id, key="run_graph")
+        else:
+            st.caption("No ticket yet — nothing to graph.")
+    else:
+        render_run_trace_interactive(result.trace, expanded=True)
 
 
 def _render_optional_followups(result, *, model: str) -> None:

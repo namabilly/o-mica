@@ -2,3 +2,4 @@ streamlit
 openai
 pydantic
 python-dotenv
+streamlit-flow-component
