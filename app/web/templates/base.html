@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>O-Mica · 丞相台</title>
+  <link rel="stylesheet" href="/static/css/omica.css">
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="face">{{ face }}</div>
+      <div class="nm">Mica</div>
+      <div class="sub">丞 相 台</div>
+    </div>
+    <div class="navlabel">Pages</div>
+    {% for key, icon, label in pages %}
+      <a class="navitem {% if key == active %}active{% endif %}" href="/{{ '' if key=='home' else key }}">
+        <span class="ic">{{ icon }}</span> {{ label }}
+      </a>
+    {% endfor %}
+    <div class="settings">
+      <div style="font-weight:700">⚙ Mica</div>
+      <label>Project</label>
+      <select>{% for p in projects %}<option {% if p==project %}selected{% endif %}>{{ p }}</option>{% endfor %}</select>
+      <label>Model</label>
+      <input type="text" value="{{ model }}" readonly>
+    </div>
+  </aside>
+
+  <main class="main">
+    {% block content %}{% endblock %}
+  </main>
+</div>
+
+<!-- modal mount: HTMX swaps content here; click backdrop to close -->
+<div id="modal" onclick="if(event.target===this) this.innerHTML=''"></div>
+</body>
+</html>

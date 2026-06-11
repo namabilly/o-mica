@@ -1,0 +1,18 @@
+<div class="board" hx-get="/tasks/board" hx-trigger="ticketChanged from:body" hx-swap="outerHTML">
+  {% for col in columns %}
+    <div class="col">
+      <h4><span class="dot {{ col.dot }}" style="position:static"></span> {{ col.label }}
+        <span class="cnt">{{ col.count }}</span></h4>
+      {% for c in col.cards %}
+        <div class="tcard" hx-get="/tasks/{{ c.id }}" hx-target="#modal" hx-swap="innerHTML">
+          <div class="tt">{{ c.title }}</div>
+          <div>
+            <span class="chip">{{ c.specialist }}/{{ c.domain }}</span>
+            {% if c.priority %}<span class="chip">{{ c.priority }}</span>{% endif %}
+          </div>
+        </div>
+      {% endfor %}
+      {% if not col.cards %}<p class="muted" style="font-size:13px;padding:4px 6px">empty ✿</p>{% endif %}
+    </div>
+  {% endfor %}
+</div>

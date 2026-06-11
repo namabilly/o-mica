@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="greet">
+  <h1>{{ greeting }}, Billy {{ face }}</h1>
+  <small>Here's your court today.</small>
+</div>
+
+<div class="row top">
+  <div class="card stat"><span class="dot lav"></span><div class="n">{{ counts.open }}</div><div class="l">Open</div></div>
+  <div class="card stat"><span class="dot peach"></span><div class="n">{{ counts.review }}</div><div class="l">In Review</div></div>
+  <div class="card stat"><span class="dot sky"></span><div class="n">{{ counts.progress }}</div><div class="l">In Progress</div></div>
+  <div class="card stat"><span class="dot mint"></span><div class="n">{{ counts.done }}</div><div class="l">Done</div></div>
+</div>
+
+<div class="row top" style="align-items:flex-start">
+  <div class="card qr" style="flex:1.4;min-width:340px">
+    <div class="section-title" style="margin-top:0"><h3>🎴 Quick Run</h3></div>
+    <form action="/run" method="get">
+      <textarea name="request" rows="3" placeholder="what shall we do today? (>w<)"></textarea>
+      <div style="display:flex;align-items:center;gap:14px;margin-top:12px">
+        <div class="seg">
+          <input type="radio" id="m_manual" name="mode" value="manual"><label for="m_manual">manual</label>
+          <input type="radio" id="m_guided" name="mode" value="guided"><label for="m_guided">guided</label>
+          <input type="radio" id="m_auto" name="mode" value="auto" checked><label for="m_auto">auto ✨</label>
+        </div>
+        <button class="btn" style="margin-left:auto" type="submit">Run ➤</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card" style="flex:1;min-width:240px">
+    <div class="section-title" style="margin-top:0"><h3>🕒 Recent runs</h3></div>
+    {% if recent %}
+      {% for r in recent %}
+        <div class="recent"><b>{{ r.title or 'untitled' }}</b>
+          <span class="muted" style="margin-left:auto">{{ r.status }}</span></div>
+      {% endfor %}
+    {% else %}
+      <p class="muted center">No runs yet ✿</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="section-title"><h3>🔔 Needs your attention</h3>
+  {% if attention %}<span class="pill pri">{{ attention|length }}</span>{% endif %}</div>
+{% if attention %}
+  <div class="card" style="padding:10px 12px">
+    {% for a in attention %}
+      <div class="attn">{{ a.icon }} <b>{{ a.title }}</b>
+        <span class="muted" style="font-size:13px">{{ a.detail }}</span>
+        <a class="arrow" href="/{{ a.go }}">open →</a></div>
+    {% endfor %}
+  </div>
+{% else %}
+  <p class="muted center" style="padding:14px 0">the desk is calm ✿</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>📚 Library</h1>
+<p class="muted">Saved handoffs, specialist outputs, and accepted deliverables.</p>
+
+<div class="seg" style="margin:14px 0">
+  <input type="radio" id="lib_out" name="libtab" checked><label for="lib_out">Outputs</label>
+  <input type="radio" id="lib_hand" name="libtab"><label for="lib_hand">Handoffs</label>
+  <input type="radio" id="lib_deliv" name="libtab"><label for="lib_deliv">Deliverables</label>
+</div>
+
+<style>
+  .lib-pane{display:none}
+  #lib_out:checked   ~ .lib-panes .pane-out{display:block}
+  #lib_hand:checked  ~ .lib-panes .pane-hand{display:block}
+  #lib_deliv:checked ~ .lib-panes .pane-deliv{display:block}
+</style>
+
+<div class="lib-panes">
+  <!-- OUTPUTS -->
+  <div class="lib-pane pane-out">
+    {% for o in outputs %}
+      <div class="card" hx-get="/library/output/{{ o.id }}" hx-target="#modal" hx-swap="innerHTML" style="cursor:pointer">
+        <b>{{ o.title }}</b> <span class="chip">{{ o.specialist }}/{{ o.domain }}</span>
+        <div class="muted" style="font-size:13px">{{ o.summary }}</div>
+      </div>
+    {% else %}<p class="muted center">No outputs yet ✿</p>{% endfor %}
+  </div>
+
+  <!-- HANDOFFS -->
+  <div class="lib-pane pane-hand">
+    {% for h in handoffs %}
+      <div class="card" hx-get="/library/handoff/{{ h.id }}" hx-target="#modal" hx-swap="innerHTML" style="cursor:pointer">
+        <b>{{ h.title }}</b> <span class="chip">{{ h.specialist }}/{{ h.domain }}</span>
+      </div>
+    {% else %}<p class="muted center">No handoffs yet ✿</p>{% endfor %}
+  </div>
+
+  <!-- DELIVERABLES -->
+  <div class="lib-pane pane-deliv">
+    {% for d in deliverables %}
+      <div class="card">
+        <b>{{ d.title }}</b> <span class="pill pri">{{ d.filename }}</span>
+        <a class="btn sm ghost" style="float:right" href="/library/deliverable/{{ d.id }}/download">⬇ download</a>
+      </div>
+    {% else %}<p class="muted center">No deliverables yet ✿</p>{% endfor %}
+  </div>
+</div>
+{% endblock %}

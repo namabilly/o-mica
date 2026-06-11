@@ -1,0 +1,9 @@
+{# Renders a list of run steps. Used in SSE updates and the final panel. #}
+{% for s in steps %}
+  <div class="step {% if s.status == 'waiting_for_review' %}cur{% endif %}">
+    <span class="ico">{{ s.icon }}</span>
+    <span class="nm">{{ s.name }}</span>
+    {% if s.message %}<span class="ar">{{ s.message }}</span>{% endif %}
+  </div>
+{% endfor %}
+{% if not steps %}<p class="muted">starting… <span class="spinner">✿</span></p>{% endif %}

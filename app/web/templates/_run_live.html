@@ -1,0 +1,34 @@
+{# Live run panel: streams trace via SSE, swaps to result when done. #}
+<div class="section-title"><h3>🧭 Trace</h3><span class="pill progress" id="run-status">running…</span></div>
+<div class="card" id="trace-box">
+  <p class="muted">starting… <span class="spinner">✿</span></p>
+</div>
+
+<script>
+(function(){
+  var runId = "{{ active_run_id }}";
+  var box = document.getElementById("trace-box");
+  var statusPill = document.getElementById("run-status");
+  var es = new EventSource("/run/stream/" + runId);
+
+  es.addEventListener("trace", function(e){
+    box.innerHTML = e.data;
+  });
+  es.addEventListener("done", function(e){
+    es.close();
+    statusPill.textContent = "done";
+    statusPill.className = "pill done";
+    // Fetch the final result panel (deliverable + trace + actions).
+    fetch("/run/result/" + runId)
+      .then(function(r){ return r.text(); })
+      .then(function(html){ document.getElementById("run-output").innerHTML = html; });
+  });
+  es.addEventListener("failed", function(e){
+    es.close();
+    statusPill.textContent = "failed";
+    statusPill.className = "pill muted";
+    box.innerHTML = "<p class='muted'>Run failed: " + e.data + "</p>";
+  });
+  es.onerror = function(){ /* network blip; EventSource auto-retries */ };
+})();
+</script>

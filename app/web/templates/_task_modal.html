@@ -1,0 +1,72 @@
+{# Ticket detail modal: Review / Dispatch / Inspect via CSS radio tabs. #}
+<div class="modal">
+  <span class="x" onclick="document.getElementById('modal').innerHTML=''">×</span>
+  {{ status_pill(t.status)|safe }}
+  <h2>{{ t.title }}</h2>
+  <div class="muted" style="font-size:13px">{{ t.specialist }}/{{ t.domain }} · {{ t.priority }} priority · {{ t.id }}</div>
+
+  <div class="seg" style="margin:14px 0">
+    <input type="radio" id="tab_review" name="mtab" checked><label for="tab_review">Review</label>
+    <input type="radio" id="tab_dispatch" name="mtab"><label for="tab_dispatch">Dispatch</label>
+    <input type="radio" id="tab_inspect" name="mtab"><label for="tab_inspect">Inspect</label>
+  </div>
+
+  <style>
+    #modal .pane{display:none}
+    #modal #tab_review:checked  ~ .panes .p-review{display:block}
+    #modal #tab_dispatch:checked ~ .panes .p-dispatch{display:block}
+    #modal #tab_inspect:checked  ~ .panes .p-inspect{display:block}
+  </style>
+
+  <div class="panes">
+    <!-- REVIEW -->
+    <div class="pane p-review">
+      <p class="muted" style="font-size:13px">{{ t.objective }}</p>
+      <form hx-post="/tasks/{{ t.id }}/review" hx-target="#modal" hx-swap="innerHTML">
+        <div class="seg" style="margin:8px 0">
+          {% for d in decisions %}
+            <input type="radio" id="d_{{ d }}" name="decision" value="{{ d }}" {{ 'checked' if loop.first }}>
+            <label for="d_{{ d }}">{{ d.replace('_',' ') }}</label>
+          {% endfor %}
+        </div>
+        <div class="field"><textarea name="note" rows="2" placeholder="approve, but keep palette warm…"></textarea></div>
+        <button class="btn" type="submit">Record decision</button>
+      </form>
+      <div style="margin-top:14px">
+        <div class="muted" style="font-size:12px;font-weight:700">REVISE WITH MICA</div>
+        <form hx-post="/tasks/{{ t.id }}/revise" hx-target="#modal" hx-swap="innerHTML">
+          <div class="field"><textarea name="instruction" rows="2" placeholder="too broad — make it a one-day task…"></textarea></div>
+          <button class="btn ghost" type="submit">Revise ✎ <span class="htmx-indicator spinner">✿</span></button>
+        </form>
+      </div>
+      <div style="margin-top:14px">
+        <div class="muted" style="font-size:12px;font-weight:700">MOVE TO STATUS</div>
+        <form hx-post="/tasks/{{ t.id }}/move" hx-target="#modal" hx-swap="innerHTML" style="display:flex;gap:8px;margin-top:6px">
+          <select name="status" style="flex:1;border:1.5px solid var(--line);border-radius:12px;padding:8px;background:var(--bg-soft)">
+            {% for s in statuses %}<option {{ 'selected' if s==t.status }}>{{ s }}</option>{% endfor %}
+          </select>
+          <button class="btn sm" type="submit">Move</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- DISPATCH -->
+    <div class="pane p-dispatch">
+      <p class="muted" style="font-size:13px">Generate a specialist handoff packet from this ticket.</p>
+      <button class="btn" hx-post="/tasks/{{ t.id }}/dispatch" hx-target="#dispatch-out" hx-swap="innerHTML">
+        Generate &amp; save handoff <span class="htmx-indicator spinner">✿</span>
+      </button>
+      <div id="dispatch-out" style="margin-top:12px">
+        {% if t.handoff_prompt %}
+          <div class="muted" style="font-size:12px;font-weight:700">EXISTING HANDOFF PROMPT</div>
+          <pre style="background:var(--bg-soft);border-radius:12px;padding:12px;white-space:pre-wrap;font-size:12px">{{ t.handoff_prompt }}</pre>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- INSPECT -->
+    <div class="pane p-inspect">
+      <pre style="background:var(--bg-soft);border-radius:12px;padding:14px;white-space:pre-wrap;font-size:12px;max-height:50vh;overflow:auto">{{ raw }}</pre>
+    </div>
+  </div>
+</div>

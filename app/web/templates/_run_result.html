@@ -1,0 +1,42 @@
+{# Final run result: deliverable (if any) + accept + trace. #}
+{% if error %}
+  <div class="section-title"><h3>⚠️ Run failed</h3><span class="pill muted">error</span></div>
+  <div class="card"><p class="muted">{{ error }}</p></div>
+{% elif output %}
+  <div class="section-title"><h3>✨ Final Candidate</h3><span class="pill done">ready</span></div>
+  <div class="deliv">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+      <b style="font-size:16px">{{ output.title }}</b>
+      {% if output.deliverable_filename %}<span class="pill pri">{{ output.deliverable_filename }}</span>{% endif %}
+    </div>
+    {% if output.summary %}<p class="muted">{{ output.summary }}</p>{% endif %}
+    <pre>{{ output.deliverable }}</pre>
+
+    <form hx-post="/run/{{ run_id }}/accept" hx-target="#accept-result" hx-swap="innerHTML"
+          style="display:flex;align-items:center;gap:10px;margin-top:14px;flex-wrap:wrap">
+      <input type="text" name="filename" value="{{ output.deliverable_filename or 'deliverable.md' }}"
+             style="border:1.5px solid var(--line);border-radius:12px;padding:8px 10px;background:var(--bg-soft);flex:1;min-width:180px">
+      <label class="muted" style="display:flex;align-items:center;gap:6px;font-size:13px">
+        <input type="checkbox" name="close_ticket" checked> mark ticket completed</label>
+      <button class="btn" type="submit">✓ Accept &amp; save</button>
+    </form>
+    <div id="accept-result"></div>
+  </div>
+{% elif ticket %}
+  <div class="section-title"><h3>📝 Ticket created</h3>{{ status_pill(ticket.status)|safe }}</div>
+  <div class="card">
+    <b>{{ ticket.title }}</b>
+    <p class="muted">{{ ticket.objective }}</p>
+    {% if can_continue %}
+      <p class="muted">{{ stop_reason }}</p>
+      <button class="btn" hx-post="/run/{{ run_id }}/continue" hx-target="#run-output" hx-swap="innerHTML">
+        Continue ▶ <span class="htmx-indicator spinner">✿</span>
+      </button>
+    {% endif %}
+  </div>
+{% endif %}
+
+<div class="section-title"><h3>🧭 Trace</h3>{{ status_pill(final_status)|safe }}</div>
+<div class="card">
+  {% include "_trace_steps.html" %}
+</div>

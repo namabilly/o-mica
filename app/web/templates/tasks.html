@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:12px">
+  <h1>🗂️ Tasks</h1>
+  <button class="btn" style="margin-left:auto"
+          hx-get="/tasks/new" hx-target="#modal" hx-swap="innerHTML">＋ New ticket</button>
+</div>
+
+{% include "_task_board.html" %}
+{% endblock %}

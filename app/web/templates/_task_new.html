@@ -1,0 +1,12 @@
+{# New ticket modal: messy request → structured ticket via Mica. #}
+<div class="modal">
+  <span class="x" onclick="document.getElementById('modal').innerHTML=''">×</span>
+  <h2>＋ New ticket</h2>
+  <p class="muted" style="font-size:13px">Describe what you need. Mica will structure it into a ticket.</p>
+  <form hx-post="/tasks/create" hx-target="#new-out" hx-swap="innerHTML">
+    <div class="field"><textarea name="request" rows="4" placeholder="I want to improve Jiuzhou recruitment…"></textarea></div>
+    <div class="field"><textarea name="context" rows="2" placeholder="optional context / constraints"></textarea></div>
+    <button class="btn" type="submit">Create ticket <span class="htmx-indicator spinner">✿</span></button>
+  </form>
+  <div id="new-out" style="margin-top:12px"></div>
+</div>

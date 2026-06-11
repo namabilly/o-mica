@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>🎴 Run</h1>
+<p class="muted">One request → Mica drives it to a finished deliverable. Inspect anytime.</p>
+
+<form class="card qr" hx-post="/run" hx-target="#run-output" hx-swap="innerHTML" style="margin-top:14px">
+  <textarea name="request" rows="2" placeholder="describe what you need — messy is fine (>w<)">{{ prefill_request or '' }}</textarea>
+  <div style="display:flex;align-items:center;gap:14px;margin-top:12px;flex-wrap:wrap">
+    <div class="seg">
+      <input type="radio" id="m_manual" name="mode" value="manual" {{ 'checked' if prefill_mode=='manual' }}><label for="m_manual">manual</label>
+      <input type="radio" id="m_guided" name="mode" value="guided" {{ 'checked' if prefill_mode=='guided' }}><label for="m_guided">guided</label>
+      <input type="radio" id="m_auto" name="mode" value="auto" {{ 'checked' if not prefill_mode or prefill_mode=='auto' }}><label for="m_auto">auto ✨</label>
+    </div>
+    <div class="seg">
+      <input type="radio" id="s_auto" name="specialist" value="auto" checked><label for="s_auto">auto</label>
+      {% for s in specialists %}
+        <input type="radio" id="s_{{ s }}" name="specialist" value="{{ s }}"><label for="s_{{ s }}">{{ s }}</label>
+      {% endfor %}
+    </div>
+    <button class="btn" style="margin-left:auto" type="submit">
+      Run ➤ <span class="htmx-indicator spinner">✿</span>
+    </button>
+  </div>
+</form>
+
+<div id="run-output">
+  {% if active_run_id %}
+    {% include "_run_live.html" %}
+  {% endif %}
+</div>
+{% endblock %}

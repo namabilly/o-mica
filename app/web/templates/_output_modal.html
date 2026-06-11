@@ -1,0 +1,19 @@
+{# Specialist output modal: view + accept-as-deliverable + run reviewer. #}
+<div class="modal">
+  <span class="x" onclick="document.getElementById('modal').innerHTML=''">×</span>
+  <h2>{{ o.title }}</h2>
+  <div class="muted" style="font-size:13px">{{ o.specialist }}/{{ o.domain }} · {{ o.id }}</div>
+  {% if o.summary %}<p class="muted" style="font-size:13px">{{ o.summary }}</p>{% endif %}
+  <pre style="background:var(--bg-soft);border-radius:12px;padding:14px;white-space:pre-wrap;font-size:12px;max-height:40vh;overflow:auto">{{ o.deliverable }}</pre>
+
+  <div class="muted" style="font-size:12px;font-weight:700;margin-top:8px">ACCEPT AS DELIVERABLE</div>
+  <form hx-post="/library/output/{{ o.id }}/accept" hx-target="#out-accept" hx-swap="innerHTML"
+        style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap">
+    <input type="text" name="filename" value="{{ o.deliverable_filename or 'deliverable.md' }}"
+           style="border:1.5px solid var(--line);border-radius:12px;padding:8px;background:var(--bg-soft);flex:1;min-width:160px">
+    <label class="muted" style="display:flex;align-items:center;gap:6px;font-size:13px">
+      <input type="checkbox" name="close_ticket" checked> close ticket</label>
+    <button class="btn sm" type="submit">✓ Accept</button>
+  </form>
+  <div id="out-accept" style="margin-top:8px"></div>
+</div>

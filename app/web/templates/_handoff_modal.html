@@ -1,0 +1,12 @@
+{# Handoff packet modal: view + run the specialist on it. #}
+<div class="modal">
+  <span class="x" onclick="document.getElementById('modal').innerHTML=''">×</span>
+  <h2>{{ h.title }}</h2>
+  <div class="muted" style="font-size:13px">{{ h.specialist }}/{{ h.domain }} · {{ h.id }}</div>
+  <pre style="background:var(--bg-soft);border-radius:12px;padding:14px;white-space:pre-wrap;font-size:12px;max-height:45vh;overflow:auto">{{ h.markdown }}</pre>
+
+  <button class="btn" hx-post="/library/handoff/{{ h.id }}/run" hx-target="#hand-run" hx-swap="innerHTML">
+    Run {{ h.specialist }} ▶ <span class="htmx-indicator spinner">✿</span>
+  </button>
+  <div id="hand-run" style="margin-top:10px"></div>
+</div>
