@@ -7,7 +7,3 @@ fastapi
 uvicorn
 jinja2
 sse-starlette
-
-# Legacy Streamlit UI (kept as fallback until web parity is verified)
-streamlit>=1.40
-streamlit-flow-component

@@ -1,8 +1,9 @@
 """Runtime settings for the O-Mica web app.
 
-Reads the OpenAI key/model from the same .streamlit/secrets.toml the Streamlit
-app uses (so there's one place to configure), with environment variables taking
-precedence. The selected project is per-session UI state, defaulting to general.
+Reads the OpenAI key/model from .streamlit/secrets.toml (the secrets file is the
+source of truth; environment variables are only a fallback). The path is kept
+for backward compatibility with existing local configs. The selected project is
+per-session UI state, defaulting to general.
 """
 
 from __future__ import annotations
