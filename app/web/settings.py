@@ -8,7 +8,10 @@ precedence. The selected project is per-session UI state, defaulting to general.
 from __future__ import annotations
 
 import os
-import tomllib
+try:
+    import tomllib
+except ImportError:
+    import tomli as tomllib  # type: ignore[no-redef]
 from functools import lru_cache
 from pathlib import Path
 
@@ -31,7 +34,10 @@ def _secrets() -> dict:
 
 
 def api_key() -> str:
-    key = os.environ.get("OPENAI_API_KEY") or _secrets().get("OPENAI_API_KEY", "")
+    # The secrets file is the source of truth (matching Streamlit's st.secrets,
+    # which ignores environment variables). A stale OPENAI_API_KEY env var would
+    # otherwise shadow the working key and cause 401s. Env is only a fallback.
+    key = _secrets().get("OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
     if not key:
         raise RuntimeError(
             "OPENAI_API_KEY not found. Set it in .streamlit/secrets.toml or the "
@@ -41,4 +47,4 @@ def api_key() -> str:
 
 
 def model() -> str:
-    return os.environ.get("OPENAI_MODEL") or _secrets().get("OPENAI_MODEL", DEFAULT_MODEL)
+    return _secrets().get("OPENAI_MODEL") or os.environ.get("OPENAI_MODEL") or DEFAULT_MODEL

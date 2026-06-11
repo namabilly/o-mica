@@ -11,12 +11,15 @@ or:
 
 from __future__ import annotations
 
+import logging
 import random
+import traceback
 import uuid
 from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
+from fastapi.responses import JSONResponse
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -58,8 +61,22 @@ def _status_pill(status: str) -> str:
 HERE = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(HERE / "templates"))
 
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger("omica")
+
 app = FastAPI(title="O-Mica")
 app.mount("/static", StaticFiles(directory=str(HERE / "static")), name="static")
+
+
+@app.exception_handler(Exception)
+async def _unhandled(request: Request, exc: Exception):
+    # Log the full traceback server-side for debugging; return a concise message
+    # to the client (no traceback leak).
+    log.error(
+        "Unhandled error on %s %s\n%s",
+        request.method, request.url, traceback.format_exc(),
+    )
+    return JSONResponse({"detail": str(exc)}, status_code=500)
 
 def _status_dot(status: str) -> str:
     s = str(getattr(status, "value", status))
